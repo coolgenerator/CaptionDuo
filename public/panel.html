@@ -1,0 +1,1415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CaptionDuo Control Panel</title>
+<style>
+  :root {
+    --bg: #0e1014; --card: #171a21; --card2: #1e222b; --line: #2a2f3b;
+    --text: #e9ebf1; --muted: #8a92a6; --accent: #ffd34d; --accent-ink: #1a1400;
+    --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
+  header h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 13px; }
+  .pills { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted);
+  }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .pill.ok::before { background: var(--ok); } .pill.warn::before { background: var(--warn); } .pill.err::before { background: var(--err); }
+  .pill.live::before { background: var(--err); animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px;
+    padding: 16px 20px 40px; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 32px; } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--muted); font-weight: 600; letter-spacing: .06em; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  input, select, textarea, button { font: inherit; color: var(--text); }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 60px; }
+  input[type=color] { width: 100%; height: 34px; padding: 2px; background: var(--card2); border: 1px solid var(--line); border-radius: 8px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; }
+  label.chk input { accent-color: var(--accent); }
+  button {
+    background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; padding: 10px 22px; font-size: 15px; }
+  button.primary.stop { background: var(--err); border-color: var(--err); color: #fff; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .hint.err { color: var(--err); } .hint.ok { color: var(--ok); }
+  code { background: var(--card2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font: 12px ui-monospace, Menlo, monospace; }
+  .meter { position: relative; height: 8px; border-radius: 4px; background: var(--card2); overflow: hidden; margin-top: 12px; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--muted); transition: width .08s linear; }
+  .meter i.voiced { background: var(--ok); }
+  .meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); } /* 触发门槛 */
+  .meterrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .meterrow .meter { flex: 1; margin-top: 0; }
+  .metername { font-size: 12px; color: var(--muted); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .miclist { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-top: 2px; }
+
+  .preview {
+    position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+    background: linear-gradient(135deg, #24384f 0%, #3d2f55 55%, #57333d 100%);
+  }
+  .preview iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; }
+
+  #log { height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  #log:empty::before { content: attr(data-empty); color: var(--muted); font-size: 13px; }
+  .uilang { width: auto; padding: 3px 8px; font-size: 12px; border-radius: 999px; }
+  .entry { border-left: 2px solid var(--line); padding-left: 10px; }
+  .entry.live { border-left-color: var(--accent); }
+  .entry .s { color: var(--muted); font-size: 13px; }
+  .entry .t { font-size: 15px; min-height: 1.5em; }
+  ol { margin: 0; padding-left: 20px; } ol li + li { margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CaptionDuo<small data-i18n="tagline">Live bilingual captions for OBS</small></h1>
+  <div class="pills">
+    <span class="pill" id="pillServer">Connecting…</span>
+    <span class="pill" id="pillKey">API Key</span>
+    <span class="pill" id="pillRec">Not started</span>
+    <select id="uiLang" class="uilang" data-i18n-title="uiLang" title="Interface language">
+      <option value="en">English</option>
+      <option value="zh">中文</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <div class="col">
+    <section class="card">
+      <h2 data-i18n="cardRec">RECOGNITION &amp; TRANSLATION</h2>
+      <div class="row">
+        <button class="primary" id="btnToggle">Start</button>
+        <label class="f grow"><span data-i18n="recognition">Recognition mode</span>
+          <select data-key="recognition" id="recognition">
+            <option value="auto" data-i18n="recAuto">Auto-detect language (speak either one)</option>
+            <option value="chrome" data-i18n="recChrome">Chrome live recognition (language A only, faster)</option>
+          </select>
+        </label>
+        <label class="f grow"><span data-i18n="audioSource">Audio source</span>
+          <select data-key="audioSource" id="audioSource">
+            <option value="mic" data-i18n="srcMic">Microphone</option>
+            <option value="display" data-i18n="srcDisplay">Tab / system audio</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" id="micRow">
+        <div class="f grow"><span data-i18n="mics">Microphones</span>
+          <div class="miclist" id="micList"></div>
+        </div>
+      </div>
+      <div class="row" data-mode="auto">
+        <label class="f grow"><span data-i18n="asrEngine">Speech-to-text engine</span>
+          <select data-key="asrEngine" id="asrEngine">
+            <option value="local" data-i18n="asrLocal">On-device</option>
+            <option value="cloud" data-i18n="asrCloud">Cloud model</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label class="f grow"><span data-i18n="langA">Language A</span>
+          <select data-key="langA" id="langA"></select>
+        </label>
+        <button id="btnSwap" data-i18n-title="swap" title="Swap languages" style="align-self:flex-end">⇄</button>
+        <label class="f grow"><span data-i18n="langB">Language B</span>
+          <select data-key="langB" id="langB"></select>
+        </label>
+      </div>
+      <div class="row" data-mode="auto">
+        <label class="f grow"><span id="sensLabel">Sensitivity</span>
+          <input type="range" id="sensitivity" min="1" max="10" step="1">
+        </label>
+        <label class="chk" id="nsWrap" style="align-self:flex-end"><input type="checkbox" id="noiseSuppression"> <span data-i18n="noiseSuppression">Browser noise suppression</span></label>
+      </div>
+      <div id="meters" hidden></div>
+      <div class="hint" id="recHint"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="cardPreview">CAPTION PREVIEW (1920×1080)</h2>
+      <div class="preview" id="preview"><iframe src="/overlay?embed" data-i18n-title="previewTitle" title="Caption preview"></iframe></div>
+      <div class="row">
+        <button id="btnDemo" data-i18n="demo">Show sample caption</button>
+        <button id="btnClear" data-i18n="clear">Clear captions</button>
+        <span class="hint" style="margin:0" data-i18n="demoHint">Sample captions are free.</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="cardLog">LIVE TRANSCRIPT</h2>
+      <div id="log"></div>
+      <div class="row" style="margin-top:12px">
+        <label class="chk"><input type="checkbox" data-key="saveTranscript"> <span data-i18n="saveTranscript">Auto-save transcript</span></label>
+        <button type="button" id="btnTranscripts" data-i18n="openFolder">Open transcripts folder</button>
+      </div>
+      <div class="hint" id="transcriptHint"></div>
+      <form class="row" id="manualForm" style="margin-top:12px">
+        <input type="text" class="grow" id="manualText" data-i18n-ph="manualPh" autocomplete="off">
+        <button data-i18n="send">Send</button>
+      </form>
+      <div class="hint err" id="errHint"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card">
+      <h2>OPENROUTER</h2>
+      <div class="row">
+        <label class="f grow">API Key
+          <input type="password" id="apiKey" placeholder="sk-or-v1-…" autocomplete="off">
+        </label>
+        <button id="btnSaveKey" style="align-self:flex-end" data-i18n="save">Save</button>
+        <button id="btnTest" style="align-self:flex-end" data-i18n="test">Test</button>
+      </div>
+      <div class="hint" id="keyHint" data-i18n="keyNote">The key is stored only in config.json on this computer.</div>
+      <div class="row">
+        <label class="f grow"><span data-i18n="model">Translation model</span>
+          <select id="modelSel"></select>
+          <input type="text" id="modelCustom" data-i18n-ph="modelCustomPh" spellcheck="false" hidden>
+        </label>
+      </div>
+      <div class="row" data-mode="auto">
+        <label class="f grow"><span data-i18n="audioModel">Cloud speech-to-text model</span>
+          <select id="audioModelSel"></select>
+          <input type="text" id="audioModelCustom" data-i18n-ph="audioModelPh" spellcheck="false" hidden>
+        </label>
+      </div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" data-key="disableReasoning"> <span data-i18n="disableReasoning">Disable reasoning</span></label>
+      </div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" data-key="translateInterim"> <span data-i18n="translateInterim">Caption while speaking</span></label>
+      </div>
+      <div class="fields" style="margin-top:10px">
+        <label class="f"><span data-i18n="interimInterval">Interim interval (ms)</span>
+          <input type="number" data-key="interimIntervalMs" min="300" max="5000" step="100">
+        </label>
+        <label class="f"><span data-i18n="contextPairs">Context sentences</span>
+          <input type="number" data-key="contextPairs" min="0" max="10">
+        </label>
+      </div>
+      <div class="row">
+        <label class="f grow"><span data-i18n="glossary">Glossary / extra instructions (optional)</span>
+          <textarea data-key="glossary" data-i18n-ph="glossaryPh"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="cardStyle">CAPTION STYLE</h2>
+      <div class="row">
+        <label class="chk"><input type="checkbox" data-key="style.showA"> <span data-i18n="showLang" data-lang="a">Show language A</span></label>
+        <label class="chk"><input type="checkbox" data-key="style.showB"> <span data-i18n="showLang" data-lang="b">Show language B</span></label>
+      </div>
+      <div class="fields" style="margin-top:12px">
+        <label class="f"><span data-i18n="order">Order</span>
+          <select data-key="style.layout" id="layout">
+            <option value="a-top" data-i18n="onTop" data-lang="a">A on top</option>
+            <option value="b-top" data-i18n="onTop" data-lang="b">B on top</option>
+          </select>
+        </label>
+        <label class="f"><span data-i18n="align">Alignment</span>
+          <select data-key="style.align">
+            <option value="left" data-i18n="alignLeft">Left</option><option value="center" data-i18n="alignCenter">Center</option><option value="right" data-i18n="alignRight">Right</option>
+          </select>
+        </label>
+        <label class="f"><span data-i18n="sizeOf" data-lang="a">A size</span>
+          <input type="number" data-key="style.sizeA" min="12" max="160">
+        </label>
+        <label class="f"><span data-i18n="sizeOf" data-lang="b">B size</span>
+          <input type="number" data-key="style.sizeB" min="12" max="160">
+        </label>
+        <label class="f"><span data-i18n="colorOf" data-lang="a">A color</span>
+          <input type="color" data-key="style.colorA">
+        </label>
+        <label class="f"><span data-i18n="colorOf" data-lang="b">B color</span>
+          <input type="color" data-key="style.colorB">
+        </label>
+        <label class="f"><span data-i18n="strokeColor">Outline color</span>
+          <input type="color" data-key="style.strokeColor">
+        </label>
+        <label class="f"><span data-i18n="strokeWidth">Outline width</span>
+          <input type="number" data-key="style.strokeWidth" min="0" max="10" step="0.5">
+        </label>
+        <label class="f"><span data-i18n="bgColor">Background</span>
+          <input type="color" data-key="style.bgColor">
+        </label>
+        <label class="f"><span data-i18n="bgOpacity">Background opacity</span>
+          <input type="range" data-key="style.bgOpacity" min="0" max="1" step="0.05">
+        </label>
+        <label class="f"><span data-i18n="fontWeight">Font weight</span>
+          <select data-key="style.fontWeight">
+            <option value="400" data-i18n="w400">Regular</option><option value="600" data-i18n="w600">Semibold</option><option value="700" data-i18n="w700">Bold</option><option value="900" data-i18n="w900">Black</option>
+          </select>
+        </label>
+        <label class="f"><span data-i18n="maxLines">Max lines per language</span>
+          <input type="number" data-key="style.maxLines" min="1" max="5">
+        </label>
+        <label class="f"><span data-i18n="maxWidth">Max width (%)</span>
+          <input type="number" data-key="style.maxWidthPct" min="20" max="100">
+        </label>
+        <label class="f"><span data-i18n="position">Position</span>
+          <select data-key="style.vPos">
+            <option value="bottom" data-i18n="posBottom">Bottom</option><option value="top" data-i18n="posTop">Top</option>
+          </select>
+        </label>
+        <label class="f"><span id="offsetLabel">Bottom offset (px)</span>
+          <input type="number" data-key="style.bottomOffset" min="0" max="1000">
+        </label>
+        <label class="f"><span data-i18n="historyLines">Previous lines kept</span>
+          <input type="number" data-key="style.historyLines" min="0" max="3">
+        </label>
+        <label class="f"><span data-i18n="hideAfter">Hide after silence (s)</span>
+          <input type="number" data-key="style.hideAfterSec" min="0" max="120">
+        </label>
+      </div>
+      <div class="row">
+        <label class="f grow"><span data-i18n="fontFamily">Font (optional)</span>
+          <input type="text" data-key="style.fontFamily" data-i18n-ph="fontPh" spellcheck="false">
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="cardObs">ADD TO OBS</h2>
+      <ol>
+        <li data-i18n="obs1">In OBS: Sources → + → Browser.</li>
+        <li><span data-i18n="obs2">Set the URL to</span> <code id="overlayUrl">http://127.0.0.1:8787/overlay</code> <button id="btnCopy" data-i18n="copy">Copy</button></li>
+        <li data-i18n="obs3">Width 1920, height 1080, then OK.</li>
+        <li data-i18n="obs4">Keep this page open in Chrome and press Start.</li>
+      </ol>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const post = (url, body = {}) =>
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+
+// 标注的耗时是 2026-11 实测的整句中位数，仅供参考
+// [模型 ID, 名称, 约几秒, 标签, 备注]
+const TEXT_MODELS = [
+  ['deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', 0.4, 'tagFastest'],
+  ['anthropic/claude-haiku-5.5', 'Claude Haiku 5.5', 0.75, 'tagStable'],
+  ['qwen/qwen3.8-flash', 'Qwen 3.8 Flash', 0.8],
+  ['qwen/qwen3.7-flash', 'Qwen 3.7 Flash', 0.9, 'tagCheapest'],
+  ['z-ai/glm-5.3-flash', 'GLM 5.3 Flash', 0.7, '', 'noteStalls'],
+  ['minimax/minimax-m3.1-flash', 'MiniMax M3.1 Flash', 1],
+];
+const AUDIO_MODELS = [
+  ['qwen/qwen3.8-omni-flash', 'Qwen 3.8 Omni Flash', 1.5, 'tagBestZh'],
+  ['google/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite', 1.2, 'tagFastest'],
+  ['openai/gpt-audio-mini', 'GPT Audio Mini', 1],
+  ['mistralai/voxtral-small-24b-2507', 'Voxtral Small', 1],
+];
+const modelLabel = ([, name, s, tag, note]) =>
+  `${name}${tag ? ` · ${t(tag)}` : ''}${t('modelMeta', { s, note: note ? t('sep') + t(note) : '' })}`;
+
+const CONFIG_VERSION = 2; // 本页面配套的服务端配置版本
+let cfg = null, langs = [];
+let stale = false;        // 后台服务比本页面旧（更新了文件但没重启服务）
+let localAsr = { ready: false, reason: '' }; // 本机识别能不能用（由服务端告知）
+const usingLocalAsr = () => cfg.asrEngine === 'local' && localAsr.ready;
+
+// ---------- 界面语言 ----------
+// 带 data-i18n 的元素取文案；{lang} 会换成语言 A / B 的名字（元素上的 data-lang 指定是哪一个）
+
+const I18N = {
+  en: {
+    title: 'CaptionDuo Control Panel',
+    tagline: 'Live bilingual captions for OBS',
+    uiLang: 'Interface language',
+    pillConnecting: 'Connecting…',
+    pillConnected: 'Server connected',
+    pillDisconnected: 'Server disconnected, reconnecting',
+    recIdle: 'Not started',
+    cardRec: 'RECOGNITION & TRANSLATION',
+    start: 'Start',
+    stop: 'Stop',
+    recognition: 'Recognition mode',
+    recAuto: 'Auto-detect language (speak either one)',
+    recChrome: 'Chrome live recognition (language A only, faster text)',
+    audioSource: 'Audio source',
+    srcMic: 'Microphone',
+    srcDisplay: 'Tab / system audio',
+    mics: 'Microphones (pick any; none checked = system default input)',
+    asrEngine: 'Speech-to-text engine',
+    asrLocal: 'On-device (free, fastest; zh / yue / en / ja / ko)',
+    asrCloud: 'Cloud model (via OpenRouter, swappable)',
+    langA: 'Language A',
+    langB: 'Language B',
+    swap: 'Swap languages',
+    noiseSuppression: 'Browser noise suppression',
+    sensitivity: 'Sensitivity {n} ({note})',
+    sensLow: 'loud voices only',
+    sensMid: 'balanced',
+    sensHigh: 'quiet speech triggers',
+    cardPreview: 'CAPTION PREVIEW (1920×1080)',
+    previewTitle: 'Caption preview',
+    demo: 'Show sample caption',
+    clear: 'Clear captions',
+    demoHint: 'Sample captions cost nothing. Use them to position and style the overlay.',
+    cardLog: 'LIVE TRANSCRIPT',
+    logEmpty: 'Recognized text and translations appear here',
+    saveTranscript: 'Auto-save transcript (a new .md and .srt each time you press Start)',
+    openFolder: 'Open transcripts folder',
+    writingTo: 'Writing to transcripts/{file}.md and .srt',
+    manualPh: 'Test without a mic: type a sentence in either language and press Enter',
+    send: 'Send',
+    save: 'Save',
+    test: 'Test',
+    keyNote: 'The key is stored only in config.json on this computer and is never sent to the overlay page.',
+    keySaved: 'Saved to config.json on this computer.',
+    testing: 'Testing…',
+    testOk: 'Connected ({model}, {ms} ms): {sample} → {text}',
+    keyPill: 'API Key {hint}',
+    keyEnv: ' (env var)',
+    noKey: 'No API key',
+    model: 'Translation model',
+    modelCustomPh: 'OpenRouter model ID, e.g. vendor/model',
+    customModel: 'Custom model ID…',
+    audioModel: 'Cloud speech-to-text model (used for cloud, or when on-device is unavailable)',
+    audioModelPh: 'OpenRouter model ID that accepts audio input',
+    modelMeta: ' (~{s} s{note})',
+    sep: ', ',
+    tagFastest: 'fastest',
+    tagStable: 'stable',
+    tagCheapest: 'cheapest',
+    tagBestZh: 'best for Chinese',
+    noteStalls: 'occasional stalls',
+    disableReasoning: 'Disable reasoning (faster; ignored by models that require it)',
+    translateInterim: 'Caption while speaking (more real-time, more API calls)',
+    interimInterval: 'Interim interval (ms)',
+    contextPairs: 'Context sentences',
+    glossary: 'Glossary / extra instructions (optional)',
+    glossaryPh: 'e.g.\nOBS = OBS Studio\nKeep the tone casual',
+    cardStyle: 'CAPTION STYLE',
+    showLang: 'Show {lang}',
+    order: 'Order',
+    onTop: '{lang} on top',
+    align: 'Alignment',
+    alignLeft: 'Left',
+    alignCenter: 'Center',
+    alignRight: 'Right',
+    sizeOf: '{lang} size',
+    colorOf: '{lang} color',
+    strokeColor: 'Outline color',
+    strokeWidth: 'Outline width',
+    bgColor: 'Background',
+    bgOpacity: 'Background opacity',
+    fontWeight: 'Font weight',
+    w400: 'Regular',
+    w600: 'Semibold',
+    w700: 'Bold',
+    w900: 'Black',
+    maxLines: 'Max lines per language',
+    maxWidth: 'Max width (%)',
+    position: 'Position',
+    posBottom: 'Bottom',
+    posTop: 'Top',
+    offsetBottom: 'Bottom offset (px)',
+    offsetTop: 'Top offset (px)',
+    historyLines: 'Previous lines kept',
+    hideAfter: 'Hide after silence (s, 0 = always show)',
+    fontFamily: 'Font (optional, name of an installed font)',
+    fontPh: 'e.g. Inter',
+    cardObs: 'ADD TO OBS',
+    obs1: 'In OBS: Sources → + → Browser, create a new source.',
+    obs2: 'Set the URL to',
+    copy: 'Copy',
+    copied: 'Copied',
+    obs3: 'Width 1920, height 1080 (match your canvas), then OK. The background is transparent.',
+    obs4: 'Keep this page open in Chrome and press Start.',
+    langSame: 'Language A and Language B must be different.',
+    hintLocal: 'Speak {a} or {b}: the language is detected automatically and the other one is shown as the translation. Speech is recognized on this computer and never uploaded; translations come from OpenRouter.',
+    hintLocalDown: 'On-device recognition is unavailable right now ({reason}), so cloud speech-to-text is used instead. ',
+    hintCloud: 'Speak {a} or {b}: the language is detected automatically and the other one is shown as the translation. Audio is sent to a speech-to-text model on OpenRouter; captions update after each sentence (or every second or so while you speak).',
+    hintChrome: 'Recognizes {a} and translates into {b}, word by word. Recognition is provided by Chrome, which sends audio to Google’s speech service.',
+    noSR: 'This browser doesn’t support Chrome live recognition. Open this page in Chrome / Edge, or switch to “Auto-detect language”.',
+    needRestart: 'Restart required',
+    staleServer: 'The background server is an older version, so new features won’t work. Stop it with Ctrl+C in its terminal and run ./start.command again; this page reloads by itself once the server restarts.',
+    starting: 'Starting',
+    stopped: 'Stopped',
+    waiting: 'Waiting for speech',
+    listening: 'Listening',
+    recognizing: 'Recognizing',
+    reconnecting: 'Reconnecting',
+    shareCancelled: 'Sharing was cancelled.',
+    micDenied: 'Microphone access was denied. Click the icon at the left of the address bar, allow the microphone for this page, and try again.',
+    micNotFound: 'No microphone found. Check your input devices.',
+    startFailed: 'Could not start recognition: {msg}',
+    micMissing: 'Previously selected mic (not connected)',
+    micFirst: 'Press Start once and allow microphone access; your devices will be listed here.',
+    noAudioTrack: 'No audio captured. When sharing, pick a tab and turn on “Also share tab audio”.',
+    serverStatus: 'Server returned {status}',
+    uploadFailed: 'Audio did not reach the background server: {msg}',
+    usingMics: 'Using: {list}',
+    listSep: ', ',
+    micDefault: 'Microphone',
+    recError: 'Recognition error ({err}), retrying…',
+    errorPrefix: 'Error: {msg}',
+    loadFailed: 'Failed to load settings: {msg}',
+  },
+  zh: {
+    title: 'CaptionDuo 控制面板',
+    tagline: 'OBS 双语实时字幕',
+    uiLang: '界面语言',
+    pillConnecting: '服务连接中',
+    pillConnected: '服务已连接',
+    pillDisconnected: '服务已断开，重连中',
+    recIdle: '未开始',
+    cardRec: '识别与翻译',
+    start: '开始识别',
+    stop: '停止识别',
+    recognition: '识别方式',
+    recAuto: '自动识别语种（两种语言随便说）',
+    recChrome: 'Chrome 实时识别（只说语言 A，出字更快）',
+    audioSource: '声音来源',
+    srcMic: '麦克风',
+    srcDisplay: '标签页 / 系统声音',
+    mics: '用哪些麦克风（可多选；都不勾就用系统默认输入设备）',
+    asrEngine: '听写引擎',
+    asrLocal: '本机识别（免费、最快；支持中 / 粤 / 英 / 日 / 韩）',
+    asrCloud: '云端模型（走 OpenRouter，可换模型）',
+    langA: '语言 A',
+    langB: '语言 B',
+    swap: '交换两种语言',
+    noiseSuppression: '浏览器降噪',
+    sensitivity: '灵敏度 {n}（{note}）',
+    sensLow: '只认较大的声音',
+    sensMid: '适中',
+    sensHigh: '小声也会触发',
+    cardPreview: '字幕预览（1920×1080）',
+    previewTitle: '字幕预览',
+    demo: '显示示例字幕',
+    clear: '清空字幕',
+    demoHint: '示例字幕不消耗额度，用来摆位置、调样式。',
+    cardLog: '实时记录',
+    logEmpty: '识别到的原文和译文会显示在这里',
+    saveTranscript: '自动保存记录（每次点「开始识别」新建一份 .md 和 .srt）',
+    openFolder: '打开记录文件夹',
+    writingTo: '正在写入 transcripts/{file}.md 和 .srt',
+    manualPh: '不用麦克风也能测试：用两种语言中的任意一种输入一句话，回车发送',
+    send: '发送',
+    save: '保存',
+    test: '测试',
+    keyNote: 'Key 只保存在本机的 config.json 里，不会发给字幕页面。',
+    keySaved: '已保存到本机 config.json。',
+    testing: '正在测试…',
+    testOk: '连接正常（{model}，{ms} 毫秒）：{sample} → {text}',
+    keyPill: 'API Key {hint}',
+    keyEnv: '（环境变量）',
+    noKey: '未设置 API Key',
+    model: '翻译模型',
+    modelCustomPh: 'OpenRouter 模型 ID，如 vendor/model',
+    customModel: '自定义模型 ID…',
+    audioModel: '云端听写模型（选了云端，或本机识别用不了时使用）',
+    audioModelPh: '需支持音频输入的 OpenRouter 模型 ID',
+    modelMeta: '（约 {s} 秒{note}）',
+    sep: '，',
+    tagFastest: '最快',
+    tagStable: '稳定',
+    tagCheapest: '最便宜',
+    tagBestZh: '中文最准',
+    noteStalls: '偶尔卡顿',
+    disableReasoning: '关闭推理（更快；不支持关闭的模型会自动忽略）',
+    translateInterim: '边说边出字幕（更实时，调用次数更多）',
+    interimInterval: '边说边译间隔（毫秒）',
+    contextPairs: '上下文句数',
+    glossary: '术语表 / 额外要求（可选）',
+    glossaryPh: '例：\n原神 = Genshin Impact\n语气轻松一点',
+    cardStyle: '字幕样式',
+    showLang: '显示{lang}',
+    order: '上下顺序',
+    onTop: '{lang} 在上',
+    align: '对齐',
+    alignLeft: '靠左',
+    alignCenter: '居中',
+    alignRight: '靠右',
+    sizeOf: '{lang} 字号',
+    colorOf: '{lang} 颜色',
+    strokeColor: '描边颜色',
+    strokeWidth: '描边粗细',
+    bgColor: '底色',
+    bgOpacity: '底色不透明度',
+    fontWeight: '字重',
+    w400: '常规',
+    w600: '半粗',
+    w700: '粗体',
+    w900: '特粗',
+    maxLines: '每种语言最多行数',
+    maxWidth: '最大宽度（%）',
+    position: '位置',
+    posBottom: '底部',
+    posTop: '顶部',
+    offsetBottom: '距底部（像素）',
+    offsetTop: '距顶部（像素）',
+    historyLines: '保留旧字幕句数',
+    hideAfter: '静默后隐藏（秒，0=常显）',
+    fontFamily: '字体（可选，填系统已安装的字体名）',
+    fontPh: '例：思源黑体 CN',
+    cardObs: '接入 OBS',
+    obs1: 'OBS「来源」→「+」→「浏览器」，新建一个来源。',
+    obs2: 'URL 填',
+    copy: '复制',
+    copied: '已复制',
+    obs3: '宽 1920、高 1080（和画布一致），确定。背景是透明的。',
+    obs4: '保持本页面在 Chrome 里开着并点「开始识别」。',
+    langSame: '语言 A 和语言 B 不能相同。',
+    hintLocal: '说{a}或{b}都行：自动判断语种，另一种语言作为译文。语音在本机识别，不上传；译文由 OpenRouter 生成。',
+    hintLocalDown: '本机识别现在用不了（{reason}），已自动改用云端听写。',
+    hintCloud: '说{a}或{b}都行：自动判断语种，另一种语言作为译文。音频会发给 OpenRouter 上的听写模型，每说完一句（或说话中每隔一秒多）更新一次字幕。',
+    hintChrome: '按{a}识别、翻译成{b}，字幕逐字出现。识别由 Chrome 提供，音频会发送到 Google 的识别服务。',
+    noSR: '这个浏览器不支持 Chrome 实时识别，请用 Chrome / Edge 打开，或改用「自动识别语种」。',
+    needRestart: '需要重启服务',
+    staleServer: '后台服务还是旧版本，新功能用不了。请在运行它的终端里按 Ctrl+C 停掉，再重新运行 ./start.command；服务重启后本页面会自动刷新。',
+    starting: '启动中',
+    stopped: '已停止',
+    waiting: '等你说话',
+    listening: '正在听',
+    recognizing: '识别中',
+    reconnecting: '重新连接中',
+    shareCancelled: '已取消共享。',
+    micDenied: '麦克风权限被拒绝：点地址栏左侧的图标，允许本页面使用麦克风后重试。',
+    micNotFound: '找不到可用的麦克风，请检查输入设备。',
+    startFailed: '无法启动识别：{msg}',
+    micMissing: '上次选的麦克风（现在没连接）',
+    micFirst: '先点一次「开始识别」并允许使用麦克风，这里才会列出设备。',
+    noAudioTrack: '没有拿到声音：共享时请选择「标签页」并勾选「同时分享标签页音频」。',
+    serverStatus: '服务返回 {status}',
+    uploadFailed: '音频没能送到后台服务：{msg}',
+    usingMics: '正在使用：{list}',
+    listSep: '、',
+    micDefault: '麦克风',
+    recError: '识别出错（{err}），正在自动重试…',
+    errorPrefix: '出错：{msg}',
+    loadFailed: '加载配置失败：{msg}',
+  },
+};
+
+// 配置加载前先用上次的界面语言，避免先闪一下英文
+let uiLang = 'en';
+try { uiLang = localStorage.getItem('captionduo.uiLang') || (navigator.language.startsWith('zh') ? 'zh' : 'en'); } catch {}
+if (!I18N[uiLang]) uiLang = 'en';
+
+function t(key, vars = {}) {
+  const text = I18N[uiLang][key] ?? I18N.en[key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
+}
+
+const langLabel = (side) => {
+  const code = cfg && (side === 'a' ? cfg.langA : cfg.langB);
+  return langs.find((l) => l.code === code)?.label || t(side === 'a' ? 'langA' : 'langB');
+};
+
+function applyI18n() {
+  document.documentElement.lang = uiLang === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('title');
+  $('#uiLang').value = uiLang;
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n, el.dataset.lang ? { lang: langLabel(el.dataset.lang) } : {});
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach((el) => (el.placeholder = t(el.dataset.i18nPh)));
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  $('#log').dataset.empty = t('logEmpty');
+}
+
+// ---------- 配置加载与表单绑定 ----------
+
+const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
+function setPath(obj, path, val) {
+  const keys = path.split('.');
+  keys.slice(0, -1).forEach((k) => (obj = obj[k] ??= {}));
+  obj[keys.at(-1)] = val;
+}
+
+let pendingPatch = {}, saveTimer = 0;
+function queueSave(path, val) {
+  setPath(cfg, path, val);
+  setPath(pendingPatch, path, val);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const patch = pendingPatch;
+    pendingPatch = {};
+    post('/api/config', patch).then((r) => {
+      // 换了语言后，本机识别可能从能用变成不能用（或反过来）
+      if (r.localAsr && r.localAsr.ready !== localAsr.ready) { localAsr = r.localAsr; renderMode(); }
+    }).catch(() => {});
+  }, 200);
+  forwardToPreview('config', { style: cfg.style });
+}
+
+function fillForm() {
+  document.querySelectorAll('[data-key]').forEach((el) => {
+    const v = getPath(cfg, el.dataset.key);
+    if (el.type === 'checkbox') el.checked = Boolean(v);
+    else el.value = v;
+  });
+}
+
+function modelPicker(key, sel, input, list) {
+  sel.innerHTML = list.map((m) => `<option value="${m[0]}">${modelLabel(m)}</option>`).join('') + `<option value="">${t('customModel')}</option>`;
+  const known = list.some(([id]) => id === cfg[key]);
+  sel.value = known ? cfg[key] : '';
+  input.hidden = known;
+  input.value = cfg[key];
+  sel.onchange = () => {
+    input.hidden = sel.value !== '';
+    if (sel.value) queueSave(key, sel.value);
+    else input.focus();
+  };
+  input.oninput = () => { if (input.value.trim()) queueSave(key, input.value.trim()); };
+}
+
+function renderKeyState() {
+  const pill = $('#pillKey');
+  pill.className = 'pill ' + (cfg.hasKey ? 'ok' : 'warn');
+  pill.textContent = cfg.hasKey ? t('keyPill', { hint: cfg.keyHint }) + (cfg.keyFromEnv ? t('keyEnv') : '') : t('noKey');
+}
+
+// 识别方式、语言变化后，更新依赖它们的文案和显隐
+function renderMode() {
+  const auto = cfg.recognition === 'auto';
+  document.querySelectorAll('[data-mode]').forEach((el) => (el.hidden = el.dataset.mode !== cfg.recognition));
+  const [a, b] = [langLabel('a'), langLabel('b')];
+  applyI18n();
+  $('#offsetLabel').textContent = t(cfg.style.vPos === 'top' ? 'offsetTop' : 'offsetBottom');
+  $('#audioSource').querySelector('[value=display]').disabled = !auto && !trackSupported;
+  $('#micRow').hidden = !auto || cfg.audioSource !== 'mic'; // Chrome 实时识别只能用 Chrome 自己的默认麦克风
+  $('#nsWrap').hidden = cfg.audioSource !== 'mic';          // 降噪只对麦克风有意义
+  if (running) return;
+  if (cfg.langA === cfg.langB) setHint('#recHint', 'err', t('langSame'));
+  else if (auto && usingLocalAsr()) setHint('#recHint', '', t('hintLocal', { a, b }));
+  else if (auto) setHint('#recHint', '', (cfg.asrEngine === 'local' ? t('hintLocalDown', { reason: localAsr.reason }) : '') + t('hintCloud', { a, b }));
+  else setHint('#recHint', SR ? '' : 'err', SR ? t('hintChrome', { a, b }) : t('noSR'));
+}
+
+async function init() {
+  const data = await (await fetch('/api/config')).json();
+  cfg = data.config;
+  langs = data.langs;
+  setUiLang(cfg.uiLang || 'en');
+  localAsr = data.localAsr || localAsr;
+  if (data.transcriptFile) showTranscriptFile(data.transcriptFile);
+  if (cfg.configVersion !== CONFIG_VERSION) {
+    stale = true;
+    $('#btnToggle').disabled = true;
+    setRecState('err', 'needRestart');
+    setHint('#recHint', 'err', t('staleServer'));
+    return;
+  }
+  for (const id of ['#langA', '#langB']) {
+    $(id).innerHTML = langs.map((l) => `<option value="${l.code}">${l.label}</option>`).join('');
+  }
+  $('#overlayUrl').textContent = data.overlayUrl;
+  fillForm();
+  modelPicker('model', $('#modelSel'), $('#modelCustom'), TEXT_MODELS);
+  modelPicker('audioModel', $('#audioModelSel'), $('#audioModelCustom'), AUDIO_MODELS);
+  renderKeyState();
+  renderMode();
+  refreshMics();
+  forwardToPreview('config', { style: cfg.style });
+
+  const restartKeys = new Set(['recognition', 'audioSource', 'langA', 'langB', 'asrEngine']);
+  document.querySelectorAll('[data-key]').forEach((el) => {
+    const numeric = el.type === 'number' || el.type === 'range' || el.dataset.key === 'style.fontWeight';
+    el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
+      if (numeric && el.value === '') return;
+      queueSave(el.dataset.key, el.type === 'checkbox' ? el.checked : numeric ? Number(el.value) : el.value);
+      if (restartKeys.has(el.dataset.key)) { restartIfRunning(); renderMode(); }
+      else if (el.dataset.key === 'style.vPos') renderMode();
+    });
+  });
+}
+
+// 切换界面语言：存进服务端配置（服务端的报错提示也跟着换），本地也记一份，下次打开不闪
+function setUiLang(lang) {
+  uiLang = I18N[lang] ? lang : 'en';
+  try { localStorage.setItem('captionduo.uiLang', uiLang); } catch {}
+  applyI18n();
+  renderServerState();
+  setRecState(recState.kind, recState.key);
+  renderSensitivity();
+  if (!cfg) return;
+  modelPicker('model', $('#modelSel'), $('#modelCustom'), TEXT_MODELS);
+  modelPicker('audioModel', $('#audioModelSel'), $('#audioModelCustom'), AUDIO_MODELS);
+  renderKeyState();
+  renderMode();
+  refreshMics();
+  if (transcriptFile) showTranscriptFile(transcriptFile);
+}
+$('#uiLang').onchange = (e) => {
+  setUiLang(e.target.value);
+  if (cfg) queueSave('uiLang', uiLang);
+};
+
+$('#btnSwap').onclick = () => {
+  const [a, b] = [cfg.langB, cfg.langA];
+  $('#langA').value = a;
+  $('#langB').value = b;
+  queueSave('langA', a);
+  queueSave('langB', b);
+  restartIfRunning();
+  renderMode();
+};
+
+$('#btnSaveKey').onclick = async () => {
+  const key = $('#apiKey').value.trim();
+  if (!key) return;
+  cfg = { ...cfg, ...(await post('/api/config', { apiKey: key })).config };
+  $('#apiKey').value = '';
+  renderKeyState();
+  setHint('#keyHint', 'ok', t('keySaved'));
+};
+
+$('#btnTest').onclick = async () => {
+  setHint('#keyHint', '', t('testing'));
+  const r = await post('/api/test').catch((e) => ({ ok: false, error: e.message }));
+  if (r.ok) setHint('#keyHint', 'ok', t('testOk', r));
+  else setHint('#keyHint', 'err', r.error);
+};
+
+$('#btnDemo').onclick = () => post('/api/demo');
+$('#btnClear').onclick = () => { post('/api/clear'); $('#log').innerHTML = ''; entries.clear(); };
+$('#btnCopy').onclick = async () => {
+  await navigator.clipboard.writeText($('#overlayUrl').textContent).catch(() => {});
+  $('#btnCopy').textContent = t('copied');
+  setTimeout(() => ($('#btnCopy').textContent = t('copy')), 1500);
+};
+
+function setHint(sel, kind, text) {
+  const el = $(sel);
+  el.className = 'hint ' + kind;
+  el.textContent = text;
+}
+
+// ---------- 预览 ----------
+// 预览 iframe 不自己连服务器，由本页把事件转发给它（省一条长连接）
+
+const preview = $('#preview');
+const previewFrame = preview.firstElementChild;
+new ResizeObserver(() => {
+  previewFrame.style.transform = `scale(${preview.clientWidth / 1920})`;
+}).observe(preview);
+
+function forwardToPreview(type, data) {
+  previewFrame.contentWindow?.postMessage({ type, data }, location.origin);
+}
+addEventListener('message', (e) => {
+  if (e.origin === location.origin && e.data?.type === 'overlay-ready' && cfg) forwardToPreview('config', { style: cfg.style });
+});
+
+// ---------- 实时记录（SSE） ----------
+
+const entries = new Map(); // id -> { el, s, t, rev }
+const log = $('#log');
+
+let serverStartedAt = null;
+const handlers = {
+  // 服务重启过（可能更新了代码）：重新加载页面，避免页面和服务版本对不上
+  hello(d) {
+    if (serverStartedAt && serverStartedAt !== d.startedAt) location.reload();
+    serverStartedAt = d.startedAt;
+  },
+  config() {}, // 样式以本页表单为准，只转发给预览
+  source(d) {
+    let en = entries.get(d.id);
+    if (!en) {
+      const el = document.createElement('div');
+      el.className = 'entry live';
+      el.innerHTML = '<div class="s"></div><div class="t"></div>';
+      log.appendChild(el);
+      en = { el, s: el.firstChild, t: el.lastChild, rev: 0 };
+      entries.set(d.id, en);
+      if (entries.size > 40) {
+        const [oldId, old] = entries.entries().next().value;
+        old.el.remove();
+        entries.delete(oldId);
+      }
+    }
+    en.s.textContent = d.text;
+    if (d.final) en.el.classList.remove('live');
+    log.scrollTop = log.scrollHeight;
+  },
+  translation(d) {
+    const en = entries.get(d.id);
+    if (!en || d.rev < en.rev) return;
+    en.rev = d.rev;
+    en.t.textContent = d.text;
+    if (d.done) setHint('#errHint', 'err', '');
+    log.scrollTop = log.scrollHeight;
+  },
+  clear() {},
+  transcript(d) { showTranscriptFile(d.file); },
+  error(d) { setHint('#errHint', 'err', t('errorPrefix', { msg: d.message })); },
+};
+
+let serverState = 'pillConnecting';
+function renderServerState() {
+  $('#pillServer').className = 'pill ' + { pillConnecting: '', pillConnected: 'ok', pillDisconnected: 'err' }[serverState];
+  $('#pillServer').textContent = t(serverState);
+}
+
+(function connect() {
+  const es = new EventSource('/events');
+  for (const [name, fn] of Object.entries(handlers)) {
+    es.addEventListener(name, (e) => {
+      if (e.data === undefined) return; // 断线时浏览器自己也会触发一个不带数据的 error 事件
+      const d = JSON.parse(e.data);
+      fn(d);
+      if (name !== 'error' && name !== 'hello' && !(name === 'config' && cfg)) forwardToPreview(name, d);
+    });
+  }
+  let dropped = false;
+  es.onopen = () => {
+    if (stale && dropped) return location.reload(); // 旧服务被重启了，重新加载以对上新版本
+    serverState = 'pillConnected';
+    renderServerState();
+  };
+  es.onerror = () => {
+    dropped = true;
+    serverState = 'pillDisconnected';
+    renderServerState();
+    if (es.readyState === EventSource.CLOSED) setTimeout(connect, 2000);
+  };
+})();
+
+// ---------- 手动输入 ----------
+
+let seq = 0;
+function sendSpeech(id, text, final) {
+  post('/api/speech', { id, text, final, seq: ++seq }).catch(() => {});
+}
+
+$('#manualForm').onsubmit = (e) => {
+  e.preventDefault();
+  const text = $('#manualText').value.trim();
+  if (!text) return;
+  sendSpeech(`manual-${Date.now()}`, text, true);
+  $('#manualText').value = '';
+};
+
+// ---------- 开始 / 停止 ----------
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+// 把音轨交给 Chrome 识别器是 Chrome 139+ 的能力，和 SR.available 同期加入
+const trackSupported = Boolean(SR && typeof SR.available === 'function');
+
+let running = false, engine = null;
+
+let recState = { kind: '', key: 'recIdle' };
+function setRecState(kind, key) {
+  recState = { kind, key };
+  $('#pillRec').className = 'pill ' + kind;
+  $('#pillRec').textContent = t(key);
+  $('#btnToggle').textContent = t(running ? 'stop' : 'start');
+  $('#btnToggle').classList.toggle('stop', running);
+}
+
+$('#btnToggle').onclick = () => {
+  if (running) return stop();
+  post('/api/transcript/new').catch(() => {}); // 每次手动开始算新的一场，记录写进新文件
+  start();
+};
+
+let transcriptFile = '';
+function showTranscriptFile(file) {
+  transcriptFile = file;
+  setHint('#transcriptHint', 'ok', t('writingTo', { file }));
+}
+$('#btnTranscripts').onclick = () => post('/api/transcript/open').catch(() => {});
+
+async function start() {
+  if (running || cfg.langA === cfg.langB) return;
+  engine = cfg.recognition === 'chrome' ? chromeEngine : autoEngine;
+  running = true;
+  setHint('#recHint', '', '');
+  setRecState('warn', 'starting');
+  try {
+    await engine.start();
+  } catch (e) {
+    fail({
+      NotAllowedError: cfg.audioSource === 'display' ? t('shareCancelled') : t('micDenied'),
+      NotFoundError: t('micNotFound'),
+    }[e.name] || t('startFailed', { msg: e.message }));
+  }
+}
+
+function stop() {
+  if (!running) return;
+  running = false;
+  engine.stop();
+  setRecState('', 'stopped');
+  renderMode();
+}
+
+function fail(message) {
+  running = false;
+  engine.stop();
+  setRecState('err', 'stopped');
+  setHint('#recHint', 'err', message);
+}
+
+function restartIfRunning() {
+  if (!running) return;
+  stop();
+  setTimeout(start, 400);
+}
+
+// ---------- 选择麦克风（可多选） ----------
+// 设备 ID 是浏览器给本页面分配的，换浏览器就不同，所以记在浏览器本地而不是服务端配置里
+
+const MIC_KEY = 'captionduo.micDeviceIds';
+let micIds = [];
+try {
+  // 早期版本只能选一支，存在另一个键里
+  micIds = JSON.parse(localStorage.getItem(MIC_KEY) || 'null') || [localStorage.getItem('captionduo.micDeviceId')].filter(Boolean);
+} catch {}
+
+function micCheckbox(label, id) {
+  const wrap = document.createElement('label');
+  wrap.className = 'chk';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.value = id;
+  box.checked = micIds.includes(id);
+  wrap.append(box, ` ${label}`);
+  return wrap;
+}
+
+async function refreshMics() {
+  let mics = [];
+  try {
+    mics = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.label && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  } catch {}
+  const rows = mics.map((d) => micCheckbox(d.label, d.deviceId));
+  for (const id of micIds) if (!mics.some((d) => d.deviceId === id)) rows.push(micCheckbox(t('micMissing'), id));
+  // 浏览器在授权麦克风之前不给设备名，所以第一次要先开始识别一次才能列出来
+  if (!rows.length) rows.push(t('micFirst'));
+  $('#micList').replaceChildren(...rows);
+}
+
+$('#micList').onchange = () => {
+  micIds = [...$('#micList').querySelectorAll('input:checked')].map((box) => box.value);
+  try { localStorage.setItem(MIC_KEY, JSON.stringify(micIds)); } catch {}
+  restartIfRunning();
+};
+navigator.mediaDevices?.addEventListener('devicechange', refreshMics); // 插拔设备时更新列表
+
+// ---------- 灵敏度与降噪 ----------
+// 和麦克风选择一样跟着这台电脑、这个浏览器走，记在浏览器本地
+
+const SENS_KEY = 'captionduo.sensitivity';
+const NS_KEY = 'captionduo.noiseSuppression';
+let sensitivity = 5;          // 1（迟钝，只认大声）～ 10（灵敏，小声也触发）
+let noiseSuppression = true;  // 浏览器自带的降噪
+try {
+  sensitivity = Math.min(10, Math.max(1, Number(localStorage.getItem(SENS_KEY)) || 5));
+  noiseSuppression = localStorage.getItem(NS_KEY) !== '0';
+} catch {}
+
+// 灵敏度 → 断句器的门槛：音量要同时高过“最低音量”和“底噪的若干倍”才算在说话
+function vadParams() {
+  const f = 2 ** ((5 - sensitivity) / 2); // 每降 2 档，门槛翻一倍
+  return { minLevel: 0.01 * f, ratio: Math.min(6, Math.max(1.8, 3 * Math.sqrt(f))) };
+}
+
+function renderSensitivity() {
+  $('#sensitivity').value = sensitivity;
+  $('#noiseSuppression').checked = noiseSuppression;
+  const note = t(sensitivity <= 3 ? 'sensLow' : sensitivity >= 8 ? 'sensHigh' : 'sensMid');
+  $('#sensLabel').textContent = t('sensitivity', { n: sensitivity, note });
+}
+
+$('#sensitivity').oninput = (e) => {
+  sensitivity = Number(e.target.value);
+  try { localStorage.setItem(SENS_KEY, sensitivity); } catch {}
+  renderSensitivity();
+  autoEngine.inputs.forEach((input) => Object.assign(input.seg, vadParams())); // 识别中直接生效，不用重新开始
+};
+$('#noiseSuppression').onchange = (e) => {
+  noiseSuppression = e.target.checked;
+  try { localStorage.setItem(NS_KEY, noiseSuppression ? '1' : '0'); } catch {}
+  restartIfRunning(); // 降噪是取音时定的，要重新取一次麦克风
+};
+renderSensitivity();
+
+// 每支选中的麦克风各取一路；没连上的跳过，一支都没取到就退回系统默认
+async function captureMics() {
+  // 多支麦克风时关掉自动增益：各路音量保持可比，才能判断哪一路只是串音
+  const base = { channelCount: 1, echoCancellation: true, noiseSuppression, autoGainControl: micIds.length < 2 };
+  const streams = [];
+  for (const id of micIds) {
+    try {
+      streams.push(await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: id } } }));
+    } catch (e) {
+      if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') continue;
+      streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+      throw e;
+    }
+  }
+  if (!streams.length) streams.push(await navigator.mediaDevices.getUserMedia({ audio: base }));
+  return streams;
+}
+
+async function captureDisplayAudio() {
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  });
+  if (!stream.getAudioTracks().length) {
+    stream.getTracks().forEach((t) => t.stop());
+    throw new Error(t('noAudioTrack'));
+  }
+  return stream;
+}
+
+// ---------- 引擎一：自动识别语种（录音 → 断句 → 交给听写模型） ----------
+
+// 断句器：按音量判断有没有人在说话。纯逻辑，不碰浏览器 API。
+class Segmenter {
+  constructor(sampleRate, { onStart, onEnd, endSilenceMs = 600, maxMs = 12000, minLevel = 0.01, ratio = 3 }) {
+    Object.assign(this, { sampleRate, onStart, onEnd, endSilenceMs, maxMs, minLevel, ratio });
+    this.threshold = minLevel; // 当前触发门槛 = max(最低音量, 底噪 × ratio)
+    this.noise = 0.003;   // 环境底噪估计，安静时缓慢跟随
+    this.level = 0;
+    this.voiced = false;
+    this.pre = [];        // 开口前约 0.3 秒，避免吃掉第一个字
+    this.reset();
+  }
+  reset() { this.active = false; this.frames = []; this.runMs = 0; this.voicedMs = 0; this.silenceMs = 0; this.totalMs = 0; }
+  feed(frame) {
+    let sum = 0;
+    for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+    const rms = (this.level = Math.sqrt(sum / frame.length));
+    const ms = (frame.length / this.sampleRate) * 1000;
+    this.threshold = Math.max(this.minLevel, this.noise * this.ratio);
+    const voiced = (this.voiced = rms > this.threshold);
+    if (!this.active) {
+      this.pre.push(frame);
+      if (this.pre.length * ms > 300) this.pre.shift();
+      if (voiced) this.runMs += ms;
+      else { this.runMs = 0; this.noise += (rms - this.noise) * 0.05; }
+      if (this.runMs >= 90) {
+        this.active = true;
+        this.frames = this.pre.splice(0);
+        this.voicedMs = this.runMs;
+        this.totalMs = this.frames.length * ms;
+        this.onStart();
+      }
+      return;
+    }
+    this.frames.push(frame);
+    this.totalMs += ms;
+    if (voiced) { this.voicedMs += ms; this.silenceMs = 0; } else this.silenceMs += ms;
+    if (this.silenceMs >= this.endSilenceMs || this.totalMs >= this.maxMs) this.flush();
+  }
+  snapshot() {
+    const out = new Float32Array(this.frames.reduce((n, f) => n + f.length, 0));
+    let at = 0;
+    for (const f of this.frames) { out.set(f, at); at += f.length; }
+    return out;
+  }
+  // 结束当前这句；太短的（咳嗽、敲键盘）丢掉
+  flush() {
+    if (!this.active) return;
+    const audio = this.voicedMs >= 250 ? this.snapshot() : null;
+    this.reset();
+    this.onEnd(audio);
+  }
+}
+
+function encodeWav(samples, sampleRate) {
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const str = (at, s) => [...s].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+function uploadAudio(id, samples, sampleRate, final) {
+  return fetch(`/api/audio?id=${encodeURIComponent(id)}&seq=${++seq}&final=${final ? 1 : 0}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/wav' },
+    body: encodeWav(samples, sampleRate),
+  }).then((r) => {
+    if (!r.ok) throw new Error(t('serverStatus', { status: r.status }));
+    return r.json();
+  }).catch((e) => {
+    setHint('#errHint', 'err', t('uploadFailed', { msg: e.message }));
+    return {};
+  });
+}
+
+// 在音频线程里把麦克风数据按 512 个采样一包转给页面
+const TAP_WORKLET = `
+class Tap extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(512); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0][0];
+    if (ch) for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n === 512) { this.port.postMessage(this.buf.slice()); this.n = 0; }
+    }
+    return true;
+  }
+}
+registerProcessor('tap', Tap);`;
+
+// 说话过程中每隔多久把“目前说到的”送去听写一次：本机识别一句只要几十毫秒，可以勤一些
+const partialEveryMs = () => (usingLocalAsr() ? 350 : 1200);
+
+const autoEngine = {
+  inputs: [],   // 每路输入（一支麦克风或一路共享的声音）各自断句、各自出字幕
+  streams: null,
+  ctx: null,
+
+  async start() {
+    this.streams = cfg.audioSource === 'display' ? [await captureDisplayAudio()] : await captureMics();
+    const ctx = (this.ctx = new AudioContext({ sampleRate: 16000 }));
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([TAP_WORKLET], { type: 'text/javascript' })));
+    if (!running) return this.stop(); // 启动过程中被停止了
+
+    const sid = Date.now().toString(36);
+    $('#meters').replaceChildren();
+    this.inputs = this.streams.map((stream, k) => this.addInput(stream, `${sid}-${k}`));
+    $('#meters').hidden = false;
+    if (cfg.audioSource === 'mic') {
+      refreshMics(); // 授权后才拿得到设备名
+      setHint('#recHint', '', t('usingMics', { list: this.inputs.map((input) => input.label).join(t('listSep')) }));
+    }
+    setRecState('ok', 'waiting');
+  },
+
+  addInput(stream, prefix) {
+    const ctx = this.ctx;
+    const track = stream.getAudioTracks()[0];
+    track.onended = () => stop();
+    const tap = new AudioWorkletNode(ctx, 'tap');
+    ctx.createMediaStreamSource(stream).connect(tap).connect(ctx.destination); // tap 不输出声音，接上只为让它持续运行
+
+    const input = { label: track.label || t('micDefault'), id: '', count: 0, lastPartial: 0, busy: false, sent: 0, sum: 0, frames: 0, lastAvg: 0, endedAt: 0 };
+    input.avg = () => (input.frames ? input.sum / input.frames : 0); // 这句话到目前为止的平均音量
+
+    // 音量条：多路时前面带上设备名
+    const row = document.createElement('div');
+    row.className = 'meterrow';
+    row.innerHTML = '<span class="metername"></span><div class="meter"><i></i><b></b></div>';
+    row.firstChild.textContent = input.label;
+    row.firstChild.hidden = this.streams.length < 2;
+    $('#meters').append(row);
+    const bar = row.querySelector('i');
+    const mark = row.querySelector('b');
+
+    input.seg = new Segmenter(ctx.sampleRate, {
+      ...vadParams(),
+      onStart: () => {
+        input.id = `${prefix}-${input.count++}`;
+        input.lastPartial = performance.now() - 400; // 开口后第一次送听写提前一点，让第一行字幕早些出来
+        input.sent = input.sum = input.frames = 0;
+        this.showState();
+      },
+      onEnd: (audio) => {
+        input.lastAvg = input.avg();
+        input.endedAt = performance.now();
+        this.showState();
+        if (audio && !(input.sent === 0 && this.isBleed(input, input.lastAvg))) uploadAudio(input.id, audio, ctx.sampleRate, true);
+      },
+    });
+
+    tap.port.onmessage = (e) => {
+      const seg = input.seg;
+      seg.feed(e.data);
+      if (seg.active && seg.voiced) { input.sum += seg.level; input.frames++; }
+      bar.style.width = `${Math.min(100, seg.level * 600)}%`;
+      bar.classList.toggle('voiced', seg.voiced);
+      mark.style.left = `${Math.min(99, seg.threshold * 600)}%`; // 黄线是门槛：音量条越过它才算在说话
+      const now = performance.now();
+      if (seg.active && cfg.translateInterim && !input.busy && seg.voicedMs >= 400 && now - input.lastPartial >= partialEveryMs()
+          && !(input.sent === 0 && this.isBleed(input, input.avg()))) {
+        input.busy = true;
+        input.lastPartial = now;
+        input.sent++;
+        uploadAudio(input.id, seg.snapshot(), ctx.sampleRate, false).finally(() => (input.busy = false));
+      }
+    };
+    return input;
+  },
+
+  // 串音：一个人说话被旁边那支麦克风也收到了，同一句会出两遍字幕。
+  // 判断办法：另一路同时在响，而且平均音量是这一路的 2 倍以上，这一路就不送去听写。
+  isBleed(input, level) {
+    const now = performance.now();
+    return level > 0 && this.inputs.some((other) => {
+      if (other === input) return false;
+      const theirs = other.seg.active ? other.avg() : now - other.endedAt < 500 ? other.lastAvg : 0;
+      return theirs >= level * 2;
+    });
+  },
+
+  showState() {
+    if (!running) return;
+    if (this.inputs.some((input) => input.seg?.active)) setRecState('live', 'listening');
+    else setRecState('ok', 'waiting');
+  },
+
+  stop() {
+    this.inputs.forEach((input) => input.seg.flush()); // 正说到一半就停：把这句收尾
+    this.inputs = [];
+    this.streams?.forEach((stream) => stream.getTracks().forEach((t) => t.stop()));
+    this.streams = null;
+    this.ctx?.close().catch(() => {});
+    this.ctx = null;
+    $('#meters').hidden = true;
+  },
+};
+
+// ---------- 引擎二：Chrome 实时识别（Web Speech API，固定识别语言 A） ----------
+
+const chromeEngine = {
+  rec: null,
+  stream: null,
+  sid: '',            // 每次识别会话一个前缀（结果下标会从 0 重新开始）
+  pending: null,      // 还没定稿的那句 { id, text }
+  cut: { idx: -1, offset: 0, part: 0 }, // 长句强制分段的状态
+  quickEnds: 0,
+  startedAt: 0,
+
+  async start() {
+    if (!SR) throw new Error(t('noSR'));
+    if (cfg.audioSource === 'display') {
+      this.stream = await captureDisplayAudio();
+      this.stream.getAudioTracks()[0].onended = () => stop();
+    }
+    this.quickEnds = 0;
+    this.listen();
+  },
+
+  stop() {
+    try { this.rec?.stop(); } catch {}
+    this.rec = null;
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+  },
+
+  listen() {
+    if (!running) return;
+    this.sid = Date.now().toString(36);
+    this.cut = { idx: -1, offset: 0, part: 0 };
+    const rec = (this.rec = new SR());
+    rec.lang = cfg.langA;
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.onstart = () => { this.startedAt = Date.now(); setRecState('live', 'recognizing'); };
+    rec.onresult = (e) => this.onResult(e);
+    rec.onerror = (e) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') fail(t('micDenied'));
+      else if (e.error === 'audio-capture') fail(t('micNotFound'));
+      else setHint('#recHint', 'err', t('recError', { err: e.error }));
+    };
+    rec.onend = () => {
+      if (this.pending) { sendSpeech(this.pending.id, this.pending.text, true); this.pending = null; }
+      if (!running || this.rec !== rec) return; // 已停止，或已经换了新的识别会话
+      // Chrome 会定期自行结束识别，这里自动续上；连续秒断时逐步放慢重试
+      this.quickEnds = Date.now() - this.startedAt < 1500 ? this.quickEnds + 1 : 0;
+      setRecState('warn', 'reconnecting');
+      setTimeout(() => this.listen(), Math.min(150 * 2 ** this.quickEnds, 5000));
+    };
+    const track = this.stream?.getAudioTracks()[0];
+    if (track) rec.start(track); else rec.start();
+  },
+
+  compact: () => /^(zh|yue|ja|ko|th)/.test(cfg.langA),
+  segId(i) { return `${this.sid}-${i}` + (this.cut.idx === i && this.cut.part ? `.${this.cut.part}` : ''); },
+  cutStart(i) { return this.cut.idx === i ? this.cut.offset : 0; },
+
+  onResult(e) {
+    let interim = '', first = -1;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) this.emitFinal(i, r[0].transcript);
+      else { if (first < 0) first = i; interim += r[0].transcript; } // Chrome 常把未定稿内容拆成多段，拼起来算一句
+    }
+    if (first >= 0) this.emitInterim(first, interim);
+  },
+
+  emitFinal(i, raw) {
+    const id = this.segId(i);
+    const text = raw.slice(this.cutStart(i)).trim() || (this.pending?.id === id ? this.pending.text : '');
+    if (text) sendSpeech(id, text, true);
+    if (this.pending?.id === id) this.pending = null;
+    if (this.cut.idx === i) this.cut = { idx: -1, offset: 0, part: 0 };
+  },
+
+  emitInterim(i, raw) {
+    const start = this.cutStart(i);
+    const body = raw.slice(start);
+    const lead = body.length - body.trimStart().length;
+    let text = body.trim();
+    if (!text) return;
+
+    // 一口气说太长时强制分段，避免字幕和翻译请求越滚越长
+    const limit = this.compact() ? 60 : 180;
+    if (text.length > limit) {
+      let at = limit;
+      if (!this.compact()) {
+        const sp = text.lastIndexOf(' ', limit);
+        if (sp > limit / 2) at = sp;
+      }
+      sendSpeech(this.segId(i), text.slice(0, at).trim(), true);
+      this.cut = { idx: i, offset: start + lead + at, part: (this.cut.idx === i ? this.cut.part : 0) + 1 };
+      text = text.slice(at).trim();
+      if (!text) { this.pending = null; return; }
+    }
+    const id = this.segId(i);
+    this.pending = { id, text };
+    sendSpeech(id, text, false);
+  },
+};
+
+setUiLang(uiLang);
+init().catch((e) => setHint('#errHint', 'err', t('loadFailed', { msg: e.message })));
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+config.json
+node_modules/
+models/
+.DS_Store
+transcripts/
+.env
+.env.*
+.claude/

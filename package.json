@@ -1,0 +1,19 @@
+{
+  "name": "captionduo",
+  "version": "0.1.0",
+  "description": "Live bilingual captions for OBS: on-device or cloud speech-to-text, LLM translation, transparent browser-source overlay",
+  "license": "MIT",
+  "repository": "github:coolgenerator/CaptionDuo",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20.3"
+  },
+  "optionalDependencies": {
+    "onnxruntime-web": "1.30.0",
+    "sherpa-onnx-node": "2.0.1"
+  }
+}

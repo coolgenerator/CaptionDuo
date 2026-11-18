@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CaptionDuo Overlay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: var(--font, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif);
+  }
+  #stage {
+    position: absolute; left: 0; right: 0; bottom: var(--offset, 60px);
+    display: flex; flex-direction: column; align-items: var(--align-items, center); gap: 10px;
+    padding: 0 4%; box-sizing: border-box;
+    transition: opacity .45s ease;
+  }
+  /* 贴顶：从顶边往下排，句子变长时向下长，不会被顶边裁掉 */
+  #stage.at-top { bottom: auto; top: var(--offset, 60px); }
+  #stage.hidden { opacity: 0; }
+  .seg {
+    max-width: var(--max-width, 90%); box-sizing: border-box;
+    display: flex; flex-direction: column; gap: .12em;
+    padding: .3em .8em; border-radius: 14px;
+    background: var(--bg, rgba(0, 0, 0, .45));
+    text-align: var(--text-align, center);
+  }
+  .b-top .seg { flex-direction: column-reverse; }
+  .seg.old { opacity: .55; }
+  /* 超过最大行数时只显示末尾几行：内容贴底，顶部裁掉（阴影/描边不被裁） */
+  .line {
+    display: flex; flex-direction: column; justify-content: flex-end;
+    line-height: 1.3; min-height: 1.3em; max-height: calc(var(--max-lines, 2) * 1.3em);
+    clip-path: inset(0 -2em -2em -2em);
+    font-weight: var(--weight, 700);
+    text-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, .6));
+    overflow-wrap: anywhere;
+  }
+  .line > span { flex-shrink: 0; }
+  .line.a { font-size: var(--size-a, 36px); color: var(--color-a, #fff); }
+  .line.b { font-size: var(--size-b, 46px); color: var(--color-b, #ffe27a); }
+  .hide-a .line.a, .hide-b .line.b { display: none; }
+</style>
+</head>
+<body>
+<div id="stage" class="hidden"></div>
+<script>
+// 每句字幕两行：语言 A 一行、语言 B 一行，位置和样式跟着语言走。
+// 说的是哪种语言(side)，原文就落在哪一行，译文落在另一行。
+const stage = document.getElementById('stage');
+const root = document.documentElement;
+let style = { historyLines: 0, hideAfterSec: 8 };
+let segs = []; // { id, el, a, b, side, rev, shown }
+let hideTimer = 0, wipeTimer = 0;
+
+function rgba(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return `rgba(0,0,0,${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function strokeShadow(width, color) {
+  const parts = [];
+  for (let i = 0; width > 0 && i < 16; i++) {
+    const a = (2 * Math.PI * i) / 16;
+    parts.push(`${(Math.cos(a) * width).toFixed(2)}px ${(Math.sin(a) * width).toFixed(2)}px 0 ${color}`);
+  }
+  parts.push('0 3px 8px rgba(0,0,0,.55)');
+  return parts.join(',');
+}
+
+function applyStyle(s) {
+  style = s;
+  const set = (k, v) => root.style.setProperty(k, v);
+  if (s.fontFamily) set('--font', `${s.fontFamily}, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif`);
+  else root.style.removeProperty('--font');
+  set('--weight', s.fontWeight);
+  set('--size-a', `${s.sizeA}px`);
+  set('--size-b', `${s.sizeB}px`);
+  set('--color-a', s.colorA);
+  set('--color-b', s.colorB);
+  set('--shadow', strokeShadow(s.strokeWidth, s.strokeColor));
+  set('--bg', s.bgOpacity > 0 ? rgba(s.bgColor, s.bgOpacity) : 'transparent');
+  set('--max-lines', Math.max(1, s.maxLines));
+  set('--max-width', `${s.maxWidthPct}%`);
+  set('--offset', `${s.bottomOffset}px`);
+  stage.classList.toggle('at-top', s.vPos === 'top');
+  set('--align-items', { left: 'flex-start', right: 'flex-end' }[s.align] || 'center');
+  set('--text-align', s.align);
+  stage.classList.toggle('hide-a', !s.showA);
+  stage.classList.toggle('hide-b', !s.showB);
+  stage.classList.toggle('b-top', s.layout === 'b-top');
+  trim();
+  touch();
+}
+
+// 一句话还在说：没定稿，且 20 秒内有过更新
+const isLive = (seg) => !seg.final && Date.now() - seg.touched < 20000;
+
+// 新句子出现时撤掉旧字幕。还在说的句子不撤：两支麦克风同时有人说话时并排显示。
+function trim() {
+  const keep = 1 + Math.max(0, style.historyLines | 0);
+  let excess = segs.length - Math.max(keep, segs.filter(isLive).length);
+  segs = segs.filter((seg) => {
+    if (excess <= 0 || isLive(seg)) return true;
+    excess--;
+    seg.el.remove();
+    return false;
+  });
+  segs.forEach((seg, i) => seg.el.classList.toggle('old', i < segs.length - 1 && !isLive(seg)));
+}
+
+function getSeg(id, create) {
+  let seg = segs.find((s) => s.id === id);
+  if (seg || !create) return seg;
+  const el = document.createElement('div');
+  el.className = 'seg';
+  el.innerHTML = '<div class="line a"><span></span></div><div class="line b"><span></span></div>';
+  stage.appendChild(el);
+  seg = { id, el, a: el.querySelector('.a span'), b: el.querySelector('.b span'), side: 'a', rev: 0, shown: '', final: false, touched: Date.now() };
+  segs.push(seg);
+  trim();
+  return seg;
+}
+
+function wipe() {
+  for (const seg of segs) seg.el.remove();
+  segs = [];
+}
+
+function touch() {
+  clearTimeout(hideTimer);
+  clearTimeout(wipeTimer);
+  if (!segs.length) return;
+  stage.classList.remove('hidden');
+  if (style.hideAfterSec > 0) {
+    hideTimer = setTimeout(() => {
+      stage.classList.add('hidden');
+      wipeTimer = setTimeout(wipe, 600);
+    }, style.hideAfterSec * 1000);
+  }
+}
+
+let serverStartedAt = null;
+const handlers = {
+  // 服务重启过（可能更新了代码）：重新加载，OBS 里不用手动刷新浏览器源
+  hello(d) {
+    if (serverStartedAt && serverStartedAt !== d.startedAt) location.reload();
+    serverStartedAt = d.startedAt;
+  },
+  config: (d) => applyStyle(d.style),
+
+  source(d) {
+    const seg = getSeg(d.id, true);
+    const side = d.side === 'b' ? 'b' : 'a';
+    if (side !== seg.side) {
+      // 听到一半改判成另一种语言：两行对调，旧译文作废
+      seg[seg.side].textContent = '';
+      seg.shown = '';
+      seg.side = side;
+    }
+    seg[side].textContent = d.text;
+    seg.final = Boolean(d.final);
+    seg.touched = Date.now();
+    touch();
+  },
+
+  translation(d) {
+    const seg = getSeg(d.id, false);
+    if (!seg || d.rev < seg.rev) return;
+    seg.rev = d.rev;
+    seg.touched = Date.now();
+    // 防闪烁：新一版译文流式输出时，等它追上已显示的长度（或输出完毕）再替换
+    if (d.done || !seg.shown || d.text.length >= seg.shown.length) {
+      seg.shown = d.text;
+      seg[seg.side === 'a' ? 'b' : 'a'].textContent = d.text;
+    }
+    touch();
+  },
+
+  clear() {
+    clearTimeout(hideTimer);
+    stage.classList.add('hidden');
+    wipe();
+  },
+};
+
+if (new URLSearchParams(location.search).has('embed')) {
+  // 嵌在控制面板的预览里：事件由面板转发，不再单独占一条连接
+  addEventListener('message', (e) => {
+    if (e.origin === location.origin) handlers[e.data?.type]?.(e.data.data);
+  });
+  parent.postMessage({ type: 'overlay-ready' }, location.origin);
+} else {
+  (function connect() {
+    const es = new EventSource('/events');
+    for (const [name, fn] of Object.entries(handlers)) es.addEventListener(name, (e) => fn(JSON.parse(e.data)));
+    es.onerror = () => {
+      // 一般会自动重连；只有被彻底关闭时才需要自己重建
+      if (es.readyState === EventSource.CLOSED) setTimeout(connect, 2000);
+    };
+  })();
+}
+</script>
+</body>
+</html>
