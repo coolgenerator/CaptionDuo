@@ -39,7 +39,7 @@ const LANGS = [
   { code: 'ar-SA', name: 'Arabic', label: 'العربية' },
 ];
 
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const DEFAULTS = {
   configVersion: CONFIG_VERSION,
   apiKey: '',
@@ -109,9 +109,10 @@ function mergeKnown(target, defaults, patch) {
   }
 }
 
-// v1 的配置按「原文/译文」命名；v2 改为固定的两种显示语言 A/B，默认翻译模型换成 DeepSeek
+// v1 的配置按「原文/译文」命名；v2 改为固定的两种显示语言 A/B，默认翻译模型换成 DeepSeek；
+// v3 只新增了字段（替换规则、自定义翻译接口、OBS 联动），不用改旧值
 function migrate(raw) {
-  if ((raw.configVersion || 1) >= CONFIG_VERSION) return raw;
+  if ((raw.configVersion || 1) >= 2) return raw;
   const s = raw.style || {};
   return {
     ...raw,
@@ -313,7 +314,7 @@ function reportError(e) {
   const now = Date.now();
   if (message === lastError.message && now - lastError.at < 5000) return message;
   lastError = { message, at: now };
-  console.warn(`[openrouter] ${message}`);
+  console.warn(`[api] ${message}`);
   broadcast('error', { message });
   return message;
 }
@@ -331,31 +332,53 @@ async function errorDetail(res) {
   }
 }
 
+const OPENROUTER = () => ({ base: BASE_URL, key: apiKey(), service: 'OpenRouter' });
+
+// 翻译走哪个接口：填了自定义地址就用它（Ollama、LM Studio 等 OpenAI 兼容接口），否则 OpenRouter。
+// 自定义接口只用它自己的 Key，绝不把 OpenRouter 的 Key 发过去。
+function translateEndpoint() {
+  const base = config.translateBase.trim().replace(/\/+$/, '');
+  if (!base) return OPENROUTER();
+  let service = base;
+  try { service = new URL(base).host; } catch {}
+  return { base, key: config.translateApiKey, service };
+}
+
 // 流式调用，返回完整文本；onDelta 每次收到增量时拿到“目前为止的全文”
-async function chat({ model, messages, maxTokens = 500, temperature = 0.2, signal, onDelta }) {
-  const key = apiKey();
-  if (!key) throw new Error(msg('noKey'));
+async function chat({ model, messages, maxTokens = 500, temperature = 0.2, signal, onDelta, endpoint = OPENROUTER() }) {
+  try {
+    return await chatOnce({ model, messages, maxTokens, temperature, signal, onDelta, endpoint });
+  } catch (e) {
+    e.service ??= endpoint.service; // 报错时说清楚是哪个服务出的问题
+    throw e;
+  }
+}
+
+async function chatOnce({ model, messages, maxTokens, temperature, signal, onDelta, endpoint }) {
+  const { base, key, service } = endpoint;
+  if (!key && service === 'OpenRouter') throw new Error(msg('noKey'));
+  const reasonKey = `${base} ${model}`;
 
   const combined = AbortSignal.any([AbortSignal.timeout(20000), ...(signal ? [signal] : [])]);
   const send = () => {
     const body = { model, messages, stream: true, temperature, max_tokens: maxTokens };
-    if (config.disableReasoning && !reasoningRequired.has(model)) body.reasoning = { enabled: false };
-    return fetch(`${BASE_URL}/chat/completions`, {
+    if (config.disableReasoning && !reasoningRequired.has(reasonKey)) body.reasoning = { enabled: false };
+    return fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: combined,
     });
   };
 
   let res = await send();
-  if (res.status === 400 && config.disableReasoning && !reasoningRequired.has(model)) {
+  if (res.status === 400 && config.disableReasoning && !reasoningRequired.has(reasonKey)) {
     const detail = await errorDetail(res);
-    if (!/reasoning/i.test(detail)) throw new Error(`OpenRouter 400：${detail}`);
-    reasoningRequired.add(model); // 这个模型必须推理，去掉参数重试
+    if (!/reasoning/i.test(detail)) throw new Error(`${service} 400: ${detail}`);
+    reasoningRequired.add(reasonKey); // 这个模型必须推理（或接口不认这个参数），去掉参数重试
     res = await send();
   }
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}：${await errorDetail(res)}`);
+  if (!res.ok) throw new Error(`${service} ${res.status}: ${await errorDetail(res)}`);
 
   const decoder = new TextDecoder();
   let buf = '';
@@ -375,7 +398,7 @@ async function chat({ model, messages, maxTokens = 500, temperature = 0.2, signa
       } catch {
         continue;
       }
-      if (json.error) throw new Error(msg('orError', { msg: json.error.message || msg('unknownError') }));
+      if (json.error) throw new Error(msg('orError', { svc: service, msg: json.error.message || msg('unknownError') }));
       const delta = json.choices?.[0]?.delta?.content;
       if (delta) {
         out += delta;
@@ -409,7 +432,46 @@ function translate(text, side, { signal, onDelta, useHistory = true } = {}) {
     }
   }
   messages.push({ role: 'user', content: text });
-  return chat({ model: config.model, messages, signal, onDelta });
+  return chat({ model: config.model, messages, signal, onDelta, endpoint: translateEndpoint() });
+}
+
+// ---------- 替换规则（听写纠错 / 屏蔽词） ----------
+// 每行一条：「听错的词 => 正确写法」，左边可以用 | 或逗号写几个说法；只写词、不写 => 的，打成 ***。
+// # 开头的行是注释。本机听写用不上术语表，固定替换是它唯一的纠错手段；
+// 规则也作用于译文，所以屏蔽词在两种语言里都能拦住。
+
+let rulesSrc = null;
+let rules = [];
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const LATIN_EDGE = /[\p{Script=Latin}\p{N}]/u;
+
+function compileRules() {
+  if (rulesSrc === config.replacements) return rules;
+  rulesSrc = config.replacements;
+  const list = [];
+  for (const raw of rulesSrc.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = /^(.*?)\s*(?:=>|→)\s*(.*)$/u.exec(line);
+    for (const from of (m ? m[1] : line).split(/[|,，]/).map((s) => s.trim()).filter(Boolean)) {
+      const to = m ? m[2] : '*'.repeat([...from].length);
+      // 拉丁字母的词按整词匹配，免得 "ass" 把 "class" 也改了；中日韩文字没有词边界，直接匹配
+      const pre = LATIN_EDGE.test([...from][0]) ? '(?<![\\p{L}\\p{N}])' : '';
+      const post = LATIN_EDGE.test([...from].at(-1)) ? '(?![\\p{L}\\p{N}])' : '';
+      const body = from.split(/\s+/).map(escapeRe).join('\\s*'); // 词中间的空格可有可无
+      list.push({ len: from.length, re: new RegExp(pre + body + post, 'giu'), to });
+    }
+  }
+  rules = list.sort((x, y) => y.len - x.len); // 长的先换：「原神启动」优先于「原神」
+  return rules;
+}
+
+function applyRules(text) {
+  const list = compileRules();
+  if (!list.length || !text) return text;
+  let out = text;
+  for (const r of list) out = out.replace(r.re, () => r.to);
+  return out === text ? text : out.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 // ---------- 本地听写（可选）----------
@@ -607,11 +669,15 @@ function getSegment(id) {
 }
 
 function onSpeech({ id, text, final, seq, side }) {
+  if (isPaused()) return;
+  side ||= guessSide(text); // 按替换前的文字猜语种：屏蔽成 *** 后就看不出来了
+  text = applyRules(text);
+  if (!/[\p{L}\p{N}]/u.test(text)) return; // 整句都被删掉或屏蔽了
   const seg = getSegment(id);
   if (seg.final || seq <= seg.seq) return; // 乱序到达的旧更新
   seg.seq = seq;
   seg.text = text;
-  seg.side = side || guessSide(text);
+  seg.side = side;
   seg.final = final;
   if (final) seg.endedAt = Date.now();
   broadcast('source', { id, text, final, side: seg.side });
@@ -632,6 +698,7 @@ function onSpeech({ id, text, final, seq, side }) {
 
 function settle(seg, result) {
   saveRecord(seg, result);
+  sendStreamCaption(seg, result);
   if (result) {
     history.push({ side: seg.side, source: seg.text, target: result });
     if (history.length > 40) history.shift();
@@ -657,10 +724,10 @@ async function runTranslation(seg) {
   seg.lastStart = Date.now();
   seg.lastSent = key;
   try {
-    const result = await translate(seg.text, seg.side, {
+    const result = applyRules(await translate(seg.text, seg.side, {
       signal: ac.signal,
-      onDelta: (partial) => broadcast('translation', { id: seg.id, rev, text: partial, done: false, final }),
-    });
+      onDelta: (partial) => broadcast('translation', { id: seg.id, rev, text: applyRules(partial), done: false, final }),
+    }));
     broadcast('translation', { id: seg.id, rev, text: result, done: true, final });
     seg.done = { key, result };
     if (final) settle(seg, result);
@@ -679,6 +746,7 @@ const audioJobs = new Map(); // id -> 进行中的“未说完”听写请求
 const audioFinal = new Set(); // 已收到定稿音频的 id
 
 async function onAudio({ id, seq, final, wav }) {
+  if (isPaused()) return { ok: false, paused: true };
   if (audioFinal.has(id)) return { ok: false };
   audioJobs.get(id)?.abort(); // 同一句有更新的音频来了，旧的不用等
   const ac = new AbortController();
@@ -705,7 +773,8 @@ async function onAudio({ id, seq, final, wav }) {
   }
 }
 
-function clearAll() {
+// 撤掉屏幕上的字幕，放弃还没出结果的听写和翻译
+function dropPending() {
   for (const seg of segments.values()) {
     clearTimeout(seg.timer);
     seg.inflight?.abort();
@@ -713,13 +782,239 @@ function clearAll() {
   for (const ac of audioJobs.values()) ac.abort();
   audioJobs.clear();
   segments.clear();
-  history.length = 0;
   broadcast('clear', {});
+}
+
+function clearAll() {
+  dropPending();
+  history.length = 0;
+}
+
+// ---------- 暂停字幕 ----------
+// 两个来源：面板（或 /api/pause）手动暂停，以及 OBS 里的麦克风来源被静音。
+// 暂停期间面板不上传音频，服务端也丢掉收到的语音，字幕层清空。
+
+const pause = { manual: false, obsMuted: false };
+let wasPaused = false;
+
+const isPaused = () => pause.manual || (config.obs.enabled && config.obs.pauseOnMute && Boolean(config.obs.micInput) && pause.obsMuted);
+
+function statusPayload() {
+  return { paused: isPaused(), manual: pause.manual, obsMuted: pause.obsMuted, obs: obs.status() };
+}
+
+// 暂停状态或 OBS 连接状态变了：告诉面板；刚进入暂停时撤掉字幕
+function updateStatus() {
+  const paused = isPaused();
+  if (paused && !wasPaused) dropPending();
+  wasPaused = paused;
+  broadcast('status', statusPayload());
+}
+
+// ---------- OBS 联动（obs-websocket 5.x） ----------
+// 用 Node 22+ 自带的 WebSocket 连接 OBS：监听麦克风来源的静音状态，推流时把定稿字幕作为直播流字幕发出去。
+
+const OBS_SUB_INPUTS = 1 << 3; // 只订阅「来源」类事件（静音、改名）
+const AUDIO_KIND = /audio|input_capture|output_capture|jack/i;
+
+const obs = {
+  ws: null,
+  state: 'off', // off | connecting | connected | error
+  error: '',
+  micError: '',
+  key: '',
+  micKey: '',
+  noRetry: false,
+  timer: null,
+  nextId: 1,
+  pending: new Map(),
+
+  status() {
+    return { state: this.state, error: this.error, micError: this.micError };
+  },
+
+  set(state, error = '') {
+    this.state = state;
+    this.error = error;
+    if (state !== 'connected') this.micError = '';
+    updateStatus();
+  },
+
+  // 配置变了：地址或密码变了就重连，换了麦克风来源就重新查一次静音状态
+  sync() {
+    const key = JSON.stringify([config.obs.enabled, config.obs.url, config.obs.password]);
+    if (key !== this.key) {
+      this.key = key;
+      this.close();
+      if (config.obs.enabled) this.connect();
+      else this.set('off');
+      return;
+    }
+    if (config.obs.micInput !== this.micKey && this.state === 'connected') this.refreshMute();
+    else updateStatus();
+  },
+
+  close() {
+    clearTimeout(this.timer);
+    const ws = this.ws;
+    this.ws = null;
+    pause.obsMuted = false;
+    for (const p of this.pending.values()) p.reject(new Error(msg('obsNotConnected')));
+    this.pending.clear();
+    try { ws?.close(); } catch {}
+  },
+
+  connect() {
+    clearTimeout(this.timer);
+    if (typeof WebSocket !== 'function') return this.set('error', msg('obsNoWs'));
+    this.noRetry = false;
+    this.set('connecting');
+    let ws;
+    try {
+      ws = this.ws = new WebSocket(config.obs.url, 'obswebsocket.json');
+    } catch (e) {
+      this.ws = null;
+      return this.set('error', e.message);
+    }
+    ws.onmessage = (e) => {
+      if (this.ws !== ws) return;
+      try {
+        this.onMessage(JSON.parse(String(e.data)));
+      } catch (err) {
+        console.warn(msg('obsLog', { msg: err.message }));
+      }
+    };
+    ws.onerror = () => {}; // 随后一定会触发 close，在那里处理
+    ws.onclose = (e) => {
+      if (this.ws !== ws) return; // 是我们自己关的
+      const wasConnected = this.state === 'connected';
+      this.close();
+      // 4009 = 密码错误；没填密码也一样：重试没用，等用户改了配置再连
+      if (e.code === 4009) return this.set('error', msg(config.obs.password ? 'obsAuthFailed' : 'obsNeedPassword'));
+      if (this.noRetry) return this.set('error', this.error);
+      this.set('error', wasConnected ? msg('obsClosed', { code: e.code }) : this.error || msg('obsUnreachable', { url: config.obs.url }));
+      this.timer = setTimeout(() => config.obs.enabled && this.connect(), 5000);
+      this.timer.unref();
+    };
+  },
+
+  send(op, d) {
+    this.ws?.send(JSON.stringify({ op, d }));
+  },
+
+  onMessage({ op, d }) {
+    if (op === 0) {
+      // Hello：要密码时按协议算出鉴权串
+      const identify = { rpcVersion: 1, eventSubscriptions: OBS_SUB_INPUTS };
+      if (d.authentication) {
+        if (!config.obs.password) {
+          this.error = msg('obsNeedPassword');
+          this.noRetry = true;
+          this.ws.close();
+          return;
+        }
+        const sha = (s) => crypto.createHash('sha256').update(s).digest('base64');
+        identify.authentication = sha(sha(config.obs.password + d.authentication.salt) + d.authentication.challenge);
+      }
+      this.send(1, identify);
+    } else if (op === 2) {
+      this.set('connected');
+      this.refreshMute();
+    } else if (op === 5) {
+      const ev = d.eventData || {};
+      if (d.eventType === 'InputMuteStateChanged' && ev.inputName === config.obs.micInput) {
+        pause.obsMuted = Boolean(ev.inputMuted);
+        updateStatus();
+      } else if (d.eventType === 'InputNameChanged' && ev.oldInputName === config.obs.micInput) {
+        config.obs.micInput = this.micKey = ev.inputName; // 在 OBS 里给来源改了名，跟着改
+        saveConfig();
+        updateStatus();
+      }
+    } else if (op === 7) {
+      const p = this.pending.get(d.requestId);
+      if (!p) return;
+      this.pending.delete(d.requestId);
+      clearTimeout(p.timer);
+      if (d.requestStatus?.result) p.resolve(d.responseData || {});
+      else p.reject(Object.assign(new Error(d.requestStatus?.comment || `OBS error ${d.requestStatus?.code}`), { code: d.requestStatus?.code }));
+    }
+  },
+
+  request(requestType, requestData = {}) {
+    if (this.state !== 'connected') return Promise.reject(new Error(msg('obsNotConnected')));
+    const requestId = String(this.nextId++);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new Error(msg('obsNotConnected')));
+      }, 5000);
+      this.pending.set(requestId, { resolve, reject, timer });
+      this.send(6, { requestType, requestId, requestData });
+    });
+  },
+
+  async refreshMute() {
+    const name = (this.micKey = config.obs.micInput);
+    this.micError = '';
+    if (!name) {
+      pause.obsMuted = false;
+      return updateStatus();
+    }
+    try {
+      const r = await this.request('GetInputMute', { inputName: name });
+      if (name === config.obs.micInput) pause.obsMuted = Boolean(r.inputMuted);
+    } catch (e) {
+      pause.obsMuted = false;
+      this.micError = e.code === 600 ? msg('obsNoInput', { name }) : e.message; // 600 = 找不到这个来源
+    }
+    updateStatus();
+  },
+
+  // 列出 OBS 里带声音的来源（麦克风、桌面音频、应用音频等），给面板选
+  async audioInputs() {
+    const { inputs = [] } = await this.request('GetInputList');
+    const audio = inputs.filter((i) => AUDIO_KIND.test(i.unversionedInputKind || i.inputKind || ''));
+    return (audio.length ? audio : inputs).map((i) => i.inputName);
+  },
+};
+
+// 推流时把定稿字幕作为直播流字幕（Twitch 等平台的 CC）发出去。没在推流时 OBS 会报错，忽略即可。
+function sendStreamCaption(seg, result) {
+  const mode = config.obs.streamCaption;
+  if (!config.obs.enabled || mode === 'off' || obs.state !== 'connected' || !seg.text) return;
+  const a = oneLine(seg.side === 'a' ? seg.text : result);
+  const b = oneLine(seg.side === 'a' ? result : seg.text);
+  const lines = mode === 'a' ? [a] : mode === 'b' ? [b] : config.style.layout === 'b-top' ? [b, a] : [a, b];
+  const captionText = lines.filter(Boolean).join('\n');
+  if (captionText) obs.request('SendStreamCaption', { captionText }).catch(() => {});
 }
 
 // ---------- HTTP ----------
 
 const PAGES = { '/panel': 'panel.html', '/overlay': 'overlay.html' };
+
+// 浏览器里跑 Silero 人声检测要用的文件：onnxruntime-web 的脚本和 wasm，加上模型本身
+const ORT_DIR = path.join(__dirname, 'node_modules', 'onnxruntime-web', 'dist');
+const VAD_MODEL = process.env.CAPTIONDUO_VAD_MODEL || path.join(__dirname, 'models', 'silero-vad', 'silero_vad.onnx');
+const STATIC_TYPES = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.onnx': 'application/octet-stream' };
+
+function vadStatus() {
+  if (!fs.existsSync(path.join(ORT_DIR, 'ort.wasm.min.js'))) return { ready: false, reason: msg('vadOrtMissing') };
+  if (!fs.existsSync(VAD_MODEL)) return { ready: false, reason: msg('vadModelMissing') };
+  return { ready: true, reason: '' };
+}
+
+function sendFile(res, file) {
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return res.writeHead(404).end('Not found');
+    res.writeHead(200, {
+      'Content-Type': STATIC_TYPES[path.extname(file)] || 'application/octet-stream',
+      'Content-Length': st.size,
+      'Cache-Control': 'max-age=86400',
+    });
+    fs.createReadStream(file).pipe(res);
+  });
+}
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
 function sendJson(res, status, data) {
@@ -758,6 +1053,8 @@ const api = {
     langs: LANGS,
     overlayUrl: `http://${HOST}:${PORT}/overlay`,
     localAsr: localAsrStatus(),
+    vad: vadStatus(),
+    status: statusPayload(),
     transcriptFile: transcript ? path.basename(transcript.base) : '',
   }),
 
@@ -765,10 +1062,30 @@ const api = {
     mergeKnown(config, DEFAULTS, body);
     if (!MSG[config.uiLang]) config.uiLang = 'en';
     if (typeof body.apiKey === 'string') config.apiKey = body.apiKey.trim();
+    config.translateApiKey = config.translateApiKey.trim();
+    config.translateBase = config.translateBase.trim();
+    config.obs.url = config.obs.url.trim() || DEFAULTS.obs.url;
+    if (!['off', 'a', 'b', 'both'].includes(config.obs.streamCaption)) config.obs.streamCaption = 'off';
     config.configVersion = CONFIG_VERSION;
     saveConfig();
     broadcast('config', { style: config.style });
+    obs.sync();
     return { config: publicConfig(), localAsr: localAsrStatus() };
+  },
+
+  // 暂停 / 继续字幕：{ paused: true | false | "toggle" }。也可以用 curl 或快捷指令调用，绑成全局快捷键
+  'POST /api/pause': async (body) => {
+    pause.manual = body.paused === 'toggle' ? !pause.manual : Boolean(body.paused);
+    updateStatus();
+    return statusPayload();
+  },
+
+  'GET /api/obs/inputs': async () => {
+    try {
+      return { ok: true, inputs: await obs.audioInputs() };
+    } catch (e) {
+      return { ok: false, error: e.message, inputs: [] };
+    }
   },
 
   // Chrome 识别或手动输入的文字；side 不给时按文字猜是 A 还是 B
@@ -856,6 +1173,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && pathname.startsWith('/vendor/ort/')) {
+    const name = pathname.slice('/vendor/ort/'.length);
+    if (!/^ort[\w.-]*\.(js|mjs|wasm)$/.test(name)) return res.writeHead(404).end('Not found');
+    return sendFile(res, path.join(ORT_DIR, name));
+  }
+  if (req.method === 'GET' && pathname === '/models/silero_vad.onnx') return sendFile(res, VAD_MODEL);
+
   if (req.method === 'GET' && pathname === '/events') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -865,6 +1189,7 @@ const server = http.createServer(async (req, res) => {
     // hello 带上本次启动时间：页面发现服务重启过（可能更新了代码）就自动重新加载
     res.write(`retry: 1500\nevent: hello\ndata: ${JSON.stringify({ startedAt: STARTED_AT })}\n\n`);
     res.write(`event: config\ndata: ${JSON.stringify({ style: config.style })}\n\n`);
+    res.write(`event: status\ndata: ${JSON.stringify(statusPayload())}\n\n`);
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
@@ -908,4 +1233,5 @@ server.listen(PORT, HOST, () => {
   console.log(msg('overlayUrl', { url: `http://${HOST}:${PORT}/overlay` }));
   console.log(localAsr ? msg('localReady') : msg('localDown', { reason: localAsrStatus().reason }));
   if (!apiKey()) console.log(msg('keyTip'));
+  obs.sync();
 });

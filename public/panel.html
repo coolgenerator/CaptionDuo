@@ -97,6 +97,7 @@
     <span class="pill" id="pillServer">Connecting…</span>
     <span class="pill" id="pillKey">API Key</span>
     <span class="pill" id="pillRec">Not started</span>
+    <span class="pill warn" id="pillPause" hidden>Paused</span>
     <select id="uiLang" class="uilang" data-i18n-title="uiLang" title="Interface language">
       <option value="en">English</option>
       <option value="zh">中文</option>
@@ -110,6 +111,7 @@
       <h2 data-i18n="cardRec">RECOGNITION &amp; TRANSLATION</h2>
       <div class="row">
         <button class="primary" id="btnToggle">Start</button>
+        <button id="btnPause" style="align-self:stretch" data-i18n-title="pauseTip">Pause captions</button>
         <label class="f grow"><span data-i18n="recognition">Recognition mode</span>
           <select data-key="recognition" id="recognition">
             <option value="auto" data-i18n="recAuto">Auto-detect language (speak either one)</option>
@@ -143,6 +145,14 @@
         <button id="btnSwap" data-i18n-title="swap" title="Swap languages" style="align-self:flex-end">⇄</button>
         <label class="f grow"><span data-i18n="langB">Language B</span>
           <select data-key="langB" id="langB"></select>
+        </label>
+      </div>
+      <div class="row" data-mode="auto">
+        <label class="f grow"><span data-i18n="vadMode">Speech detection</span>
+          <select id="vadMode">
+            <option value="silero" data-i18n="vadSilero">Silero voice model (recommended)</option>
+            <option value="volume" data-i18n="vadVolume">Volume threshold</option>
+          </select>
         </label>
       </div>
       <div class="row" data-mode="auto">
@@ -183,7 +193,7 @@
 
   <div class="col">
     <section class="card">
-      <h2>OPENROUTER</h2>
+      <h2 data-i18n="cardApi">OPENROUTER &amp; TRANSLATION API</h2>
       <div class="row">
         <label class="f grow">API Key
           <input type="password" id="apiKey" placeholder="sk-or-v1-…" autocomplete="off">
@@ -198,6 +208,18 @@
           <input type="text" id="modelCustom" data-i18n-ph="modelCustomPh" spellcheck="false" hidden>
         </label>
       </div>
+      <div class="row">
+        <label class="f grow"><span data-i18n="translateBase">Custom translation endpoint (optional)</span>
+          <input type="text" data-key="translateBase" data-lazy placeholder="http://127.0.0.1:11434/v1" spellcheck="false" autocomplete="off">
+        </label>
+      </div>
+      <div class="row" id="tkRow">
+        <label class="f grow"><span data-i18n="translateKey">API key for that endpoint (optional)</span>
+          <input type="password" id="translateKey" autocomplete="off">
+        </label>
+        <button id="btnSaveTKey" style="align-self:flex-end" data-i18n="save">Save</button>
+      </div>
+      <div class="hint" id="tbHint"></div>
       <div class="row" data-mode="auto">
         <label class="f grow"><span data-i18n="audioModel">Cloud speech-to-text model</span>
           <select id="audioModelSel"></select>
@@ -223,6 +245,12 @@
           <textarea data-key="glossary" data-i18n-ph="glossaryPh"></textarea>
         </label>
       </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="cardRules">CORRECTIONS &amp; BLOCKED WORDS</h2>
+      <textarea data-key="replacements" id="replacements" rows="6" spellcheck="false" data-i18n-ph="rulesPh"></textarea>
+      <div class="hint" data-i18n="rulesHint">One rule per line.</div>
     </section>
 
     <section class="card">
@@ -309,6 +337,45 @@
         <li data-i18n="obs4">Keep this page open in Chrome and press Start.</li>
       </ol>
     </section>
+
+    <section class="card">
+      <h2 data-i18n="cardObsLink">OBS CONNECTION (obs-websocket)</h2>
+      <div class="row">
+        <label class="chk"><input type="checkbox" data-key="obs.enabled"> <span data-i18n="obsEnabled">Connect to OBS</span></label>
+        <span class="pill" id="pillObs" style="margin-left:auto">Off</span>
+      </div>
+      <div id="obsFields">
+        <div class="row">
+          <label class="f grow"><span data-i18n="obsUrl">Server address</span>
+            <input type="text" data-key="obs.url" data-lazy spellcheck="false" autocomplete="off">
+          </label>
+          <label class="f grow"><span id="obsPwLabel">Password</span>
+            <input type="password" id="obsPassword" autocomplete="off">
+          </label>
+          <button id="btnSaveObsPw" style="align-self:flex-end" data-i18n="save">Save</button>
+        </div>
+        <div class="row">
+          <label class="f grow"><span data-i18n="obsMic">Microphone source in OBS</span>
+            <select id="obsMic"></select>
+          </label>
+          <button id="btnObsRefresh" style="align-self:flex-end" data-i18n="refresh">Refresh</button>
+        </div>
+        <div class="row">
+          <label class="chk"><input type="checkbox" data-key="obs.pauseOnMute"> <span data-i18n="obsPauseOnMute">Pause captions while this source is muted in OBS</span></label>
+        </div>
+        <div class="row">
+          <label class="f grow"><span data-i18n="obsCaption">Send as stream captions (CC on Twitch etc.)</span>
+            <select data-key="obs.streamCaption">
+              <option value="off" data-i18n="ccOff">Off</option>
+              <option value="a" data-i18n="ccLang" data-lang="a">A</option>
+              <option value="b" data-i18n="ccLang" data-lang="b">B</option>
+              <option value="both" data-i18n="ccBoth">Both</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="hint" id="obsHint"></div>
+    </section>
   </div>
 </main>
 
@@ -336,10 +403,13 @@ const AUDIO_MODELS = [
 const modelLabel = ([, name, s, tag, note]) =>
   `${name}${tag ? ` · ${t(tag)}` : ''}${t('modelMeta', { s, note: note ? t('sep') + t(note) : '' })}`;
 
-const CONFIG_VERSION = 2; // 本页面配套的服务端配置版本
+const CONFIG_VERSION = 3; // 本页面配套的服务端配置版本
 let cfg = null, langs = [];
 let stale = false;        // 后台服务比本页面旧（更新了文件但没重启服务）
 let localAsr = { ready: false, reason: '' }; // 本机识别能不能用（由服务端告知）
+let vadAvail = { ready: false, reason: '' }; // Silero 人声检测的文件齐不齐（由服务端告知）
+// 暂停状态和 OBS 连接状态，由服务端通过 SSE 推送
+let status = { paused: false, manual: false, obsMuted: false, obs: { state: 'off', error: '', micError: '' } };
 const usingLocalAsr = () => cfg.asrEngine === 'local' && localAsr.ready;
 
 // ---------- 界面语言 ----------
@@ -480,6 +550,48 @@ const I18N = {
     recError: 'Recognition error ({err}), retrying…',
     errorPrefix: 'Error: {msg}',
     loadFailed: 'Failed to load settings: {msg}',
+    pause: 'Pause captions',
+    resume: 'Resume captions',
+    pauseTip: 'Stop sending audio and clear the overlay until you resume',
+    paused: 'Captions paused',
+    pausedRec: 'Paused',
+    pausedObs: 'Paused: mic muted in OBS',
+    vadMode: 'Speech detection',
+    vadSilero: 'Silero voice model (recommended: ignores keyboard and game sounds)',
+    vadVolume: 'Volume threshold',
+    vadDown: 'Silero voice model unavailable ({reason}); using the volume threshold.',
+    vadLoadFailed: 'Silero voice model failed to load ({msg}); using the volume threshold.',
+    vadNote: ' The yellow line is the minimum volume; the bar turns green when the model hears a voice.',
+    cardApi: 'OPENROUTER & TRANSLATION API',
+    translateBase: 'Custom translation endpoint (optional, OpenAI-compatible)',
+    translateKey: 'API key for that endpoint (optional)',
+    tbHintOff: 'Empty = translate via OpenRouter. Enter e.g. Ollama (http://127.0.0.1:11434/v1) or LM Studio (http://127.0.0.1:1234/v1) to translate locally; speech-to-text is unaffected.',
+    tbHintOn: 'Translations go to {base}. Pick “Custom model ID” above and enter the model name used by that endpoint (e.g. qwen3:8b). Your OpenRouter key is never sent there.',
+    tkSaved: 'Endpoint key saved.',
+    tkHas: 'An endpoint key is saved.',
+    cardRules: 'CORRECTIONS & BLOCKED WORDS',
+    rulesPh: '# One rule per line: misheard => correct\nGenshin Impacts | Gin shin => Genshin Impact\n# A word without => is masked as ***\ndamn',
+    rulesHint: 'Applied after speech-to-text and before translation (and to translations too). Use | or commas for several spellings; a word without => is masked with ***. Unlike the glossary, this also works for on-device recognition. Latin words match whole words only.',
+    cardObsLink: 'OBS CONNECTION (obs-websocket)',
+    obsEnabled: 'Connect to OBS',
+    obsUrl: 'Server address',
+    obsPw: 'Password',
+    obsPwSaved: 'Password (saved)',
+    obsMic: 'Microphone source in OBS',
+    obsMicNone: '(none: don’t follow mute)',
+    obsMicMissing: '{name} (not found)',
+    refresh: 'Refresh',
+    obsPauseOnMute: 'Pause captions while this source is muted in OBS (use OBS’s mute hotkey as a global pause key)',
+    obsCaption: 'Send as stream captions (CC on Twitch etc., only while streaming)',
+    ccOff: 'Off',
+    ccLang: '{lang}',
+    ccBoth: 'Both languages',
+    obsOff: 'Off',
+    obsConnecting: 'Connecting',
+    obsConnected: 'Connected',
+    obsError: 'Not connected',
+    obsHint: 'In OBS: Tools → WebSocket Server Settings → Enable WebSocket server; “Show Connect Info” shows the password. Stream captions use CEA-608, which most platforms display only for Latin text.',
+    obsPwSavedHint: 'OBS password saved.',
   },
   zh: {
     title: 'CaptionDuo 控制面板',
@@ -615,6 +727,48 @@ const I18N = {
     recError: '识别出错（{err}），正在自动重试…',
     errorPrefix: '出错：{msg}',
     loadFailed: '加载配置失败：{msg}',
+    pause: '暂停字幕',
+    resume: '继续字幕',
+    pauseTip: '暂停期间不上传音频、清空字幕，点「继续字幕」恢复',
+    paused: '字幕已暂停',
+    pausedRec: '已暂停',
+    pausedObs: '已暂停：OBS 里麦克风静音',
+    vadMode: '人声检测',
+    vadSilero: 'Silero 人声模型（推荐：键盘声、游戏音效不会触发）',
+    vadVolume: '按音量判断',
+    vadDown: 'Silero 人声模型用不了（{reason}），改用音量判断。',
+    vadLoadFailed: 'Silero 人声模型加载失败（{msg}），改用音量判断。',
+    vadNote: '黄线是最低音量，模型听出人声时音量条变绿。',
+    cardApi: 'OPENROUTER 与翻译接口',
+    translateBase: '自定义翻译接口（可选，OpenAI 兼容）',
+    translateKey: '该接口的 API Key（可选）',
+    tbHintOff: '留空 = 翻译走 OpenRouter。填 Ollama（http://127.0.0.1:11434/v1）或 LM Studio（http://127.0.0.1:1234/v1）等地址就能在本机翻译、断网也能用；听写不受影响。',
+    tbHintOn: '翻译改走 {base}。上面的翻译模型请选「自定义模型 ID」，填这个接口里的模型名（如 qwen3:8b）。OpenRouter 的 Key 不会发给它。',
+    tkSaved: '接口 Key 已保存。',
+    tkHas: '已保存接口 Key。',
+    cardRules: '纠错与屏蔽词',
+    rulesPh: '# 每行一条：听错的词 => 正确写法\n元深 | 原深 => 原神\n欧比爱斯 => OBS\n# 只写词、不写 => 的，打成 ***\n卧槽',
+    rulesHint: '听写之后、翻译之前替换（译文也会过一遍）。左边用 | 或逗号写多个说法；不写 => 的词打成 ***。和术语表不同，本机听写也能用。英文等拉丁字母按整词匹配。',
+    cardObsLink: 'OBS 联动（obs-websocket）',
+    obsEnabled: '连接 OBS',
+    obsUrl: '服务器地址',
+    obsPw: '密码',
+    obsPwSaved: '密码（已保存）',
+    obsMic: 'OBS 里的麦克风来源',
+    obsMicNone: '（不跟随静音）',
+    obsMicMissing: '{name}（没找到）',
+    refresh: '刷新',
+    obsPauseOnMute: '这个来源在 OBS 里静音时暂停字幕（给 OBS 设个静音快捷键，就是全局暂停键）',
+    obsCaption: '发送到直播流字幕（Twitch 等平台的 CC，只在推流时生效）',
+    ccOff: '不发送',
+    ccLang: '{lang}',
+    ccBoth: '两种语言都发',
+    obsOff: '未开启',
+    obsConnecting: '连接中',
+    obsConnected: '已连接',
+    obsError: '未连接',
+    obsHint: 'OBS 里打开「工具 → WebSocket 服务器设置」，勾选「开启 WebSocket 服务器」；点「显示连接信息」能看到密码。直播流字幕走 CEA-608 标准，大多数平台只能正常显示英文等拉丁字母。',
+    obsPwSavedHint: 'OBS 密码已保存。',
   },
 };
 
@@ -710,8 +864,8 @@ function renderMode() {
   $('#nsWrap').hidden = cfg.audioSource !== 'mic';          // 降噪只对麦克风有意义
   if (running) return;
   if (cfg.langA === cfg.langB) setHint('#recHint', 'err', t('langSame'));
-  else if (auto && usingLocalAsr()) setHint('#recHint', '', t('hintLocal', { a, b }));
-  else if (auto) setHint('#recHint', '', (cfg.asrEngine === 'local' ? t('hintLocalDown', { reason: localAsr.reason }) : '') + t('hintCloud', { a, b }));
+  else if (auto && usingLocalAsr()) setHint('#recHint', '', t('hintLocal', { a, b }) + vadDownNote());
+  else if (auto) setHint('#recHint', '', (cfg.asrEngine === 'local' ? t('hintLocalDown', { reason: localAsr.reason }) : '') + t('hintCloud', { a, b }) + vadDownNote());
   else setHint('#recHint', SR ? '' : 'err', SR ? t('hintChrome', { a, b }) : t('noSR'));
 }
 
@@ -721,6 +875,8 @@ async function init() {
   langs = data.langs;
   setUiLang(cfg.uiLang || 'en');
   localAsr = data.localAsr || localAsr;
+  vadAvail = data.vad || vadAvail;
+  if (data.status) status = data.status;
   if (data.transcriptFile) showTranscriptFile(data.transcriptFile);
   if (cfg.configVersion !== CONFIG_VERSION) {
     stale = true;
@@ -738,17 +894,23 @@ async function init() {
   modelPicker('audioModel', $('#audioModelSel'), $('#audioModelCustom'), AUDIO_MODELS);
   renderKeyState();
   renderMode();
+  renderVad();
+  renderExtras();
   refreshMics();
   forwardToPreview('config', { style: cfg.style });
+  if (status.obs.state === 'connected') loadObsInputs();
 
   const restartKeys = new Set(['recognition', 'audioSource', 'langA', 'langB', 'asrEngine']);
   document.querySelectorAll('[data-key]').forEach((el) => {
     const numeric = el.type === 'number' || el.type === 'range' || el.dataset.key === 'style.fontWeight';
-    el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
+    // data-lazy：改完（失焦或回车）才保存，比如地址栏，免得每敲一个字就重连一次
+    const lazy = el.type === 'checkbox' || el.tagName === 'SELECT' || 'lazy' in el.dataset;
+    el.addEventListener(lazy ? 'change' : 'input', () => {
       if (numeric && el.value === '') return;
-      queueSave(el.dataset.key, el.type === 'checkbox' ? el.checked : numeric ? Number(el.value) : el.value);
+      queueSave(el.dataset.key, el.type === 'checkbox' ? el.checked : numeric ? Number(el.value) : 'lazy' in el.dataset ? el.value.trim() : el.value);
       if (restartKeys.has(el.dataset.key)) { restartIfRunning(); renderMode(); }
       else if (el.dataset.key === 'style.vPos') renderMode();
+      else renderExtras();
     });
   });
 }
@@ -766,6 +928,8 @@ function setUiLang(lang) {
   modelPicker('audioModel', $('#audioModelSel'), $('#audioModelCustom'), AUDIO_MODELS);
   renderKeyState();
   renderMode();
+  renderVad();
+  renderExtras();
   refreshMics();
   if (transcriptFile) showTranscriptFile(transcriptFile);
 }
@@ -812,6 +976,84 @@ function setHint(sel, kind, text) {
   const el = $(sel);
   el.className = 'hint ' + kind;
   el.textContent = text;
+}
+
+// ---------- 暂停、自定义翻译接口、OBS 联动 ----------
+
+$('#btnPause').onclick = async () => {
+  status = { ...status, ...(await post('/api/pause', { paused: !status.manual }).catch(() => ({}))) };
+  renderExtras();
+};
+
+// 选填的 Key 和密码：留空再点保存就是清掉
+$('#btnSaveTKey').onclick = async () => {
+  cfg = { ...cfg, ...(await post('/api/config', { translateApiKey: $('#translateKey').value.trim() })).config };
+  $('#translateKey').value = '';
+  renderExtras();
+  flashHint('#tbHint', t('tkSaved'));
+};
+$('#btnSaveObsPw').onclick = async () => {
+  cfg = { ...cfg, ...(await post('/api/config', { obs: { password: $('#obsPassword').value } })).config };
+  $('#obsPassword').value = '';
+  renderExtras();
+  flashHint('#obsHint', t('obsPwSavedHint'));
+};
+
+let obsInputs = [];
+async function loadObsInputs() {
+  const r = await fetch('/api/obs/inputs').then((res) => res.json()).catch(() => ({ inputs: [] }));
+  obsInputs = r.inputs || [];
+  renderObsMic();
+}
+$('#btnObsRefresh').onclick = loadObsInputs;
+
+function renderObsMic() {
+  const sel = $('#obsMic');
+  const cur = cfg.obs.micInput;
+  const opts = [['', t('obsMicNone')], ...obsInputs.map((n) => [n, n])];
+  if (cur && !obsInputs.includes(cur)) opts.push([cur, status.obs.state === 'connected' ? t('obsMicMissing', { name: cur }) : cur]);
+  sel.replaceChildren(...opts.map(([v, label]) => new Option(label, v)));
+  sel.value = cur;
+}
+$('#obsMic').onchange = (e) => queueSave('obs.micInput', e.target.value);
+
+// 依赖服务端状态的那些显示：暂停按钮、暂停提示、OBS 连接状态、翻译接口说明
+function renderExtras() {
+  if (!cfg) return;
+  $('#btnPause').textContent = t(status.manual ? 'resume' : 'pause');
+  $('#pillPause').hidden = !status.paused;
+  $('#pillPause').textContent = t(status.manual ? 'paused' : 'pausedObs');
+  if (running) {
+    if (status.paused) setRecState('warn', 'pausedRec');
+    else if (engine === autoEngine) autoEngine.showState();
+    else setRecState('live', 'recognizing');
+  }
+
+  const base = (cfg.translateBase || '').trim();
+  $('#tkRow').hidden = !base;
+  if (!flashing.has('#tbHint')) {
+    setHint('#tbHint', '', base ? t('tbHintOn', { base }) + (cfg.hasTranslateKey ? ' ' + t('tkHas') : '') : t('tbHintOff'));
+  }
+
+  const o = status.obs;
+  const state = cfg.obs.enabled ? o.state : 'off';
+  $('#pillObs').className = 'pill ' + ({ connected: 'ok', connecting: 'warn', error: 'err' }[state] || '');
+  $('#pillObs').textContent = t({ connected: 'obsConnected', connecting: 'obsConnecting', error: 'obsError' }[state] || 'obsOff');
+  $('#obsPwLabel').textContent = t(cfg.obs.hasPassword ? 'obsPwSaved' : 'obsPw');
+  if (!flashing.has('#obsHint')) {
+    if (state === 'error') setHint('#obsHint', 'err', o.error);
+    else if (state === 'connected' && o.micError) setHint('#obsHint', 'err', o.micError);
+    else setHint('#obsHint', '', t('obsHint'));
+  }
+  renderObsMic();
+}
+
+// 「已保存」这类一次性提示：显示几秒，期间 renderExtras 不覆盖它，之后换回常规说明
+const flashing = new Set();
+function flashHint(sel, text) {
+  setHint(sel, 'ok', text);
+  flashing.add(sel);
+  setTimeout(() => { flashing.delete(sel); renderExtras(); }, 2500);
 }
 
 // ---------- 预览 ----------
@@ -871,6 +1113,12 @@ const handlers = {
     log.scrollTop = log.scrollHeight;
   },
   clear() {},
+  status(d) {
+    const was = status.obs.state;
+    status = d;
+    renderExtras();
+    if (d.obs.state === 'connected' && was !== 'connected') loadObsInputs();
+  },
   transcript(d) { showTranscriptFile(d.file); },
   error(d) { setHint('#errHint', 'err', t('errorPrefix', { msg: d.message })); },
 };
@@ -909,6 +1157,7 @@ function renderServerState() {
 
 let seq = 0;
 function sendSpeech(id, text, final) {
+  if (status.paused) return;
   post('/api/speech', { id, text, final, seq: ++seq }).catch(() => {});
 }
 
@@ -1040,10 +1289,103 @@ try {
   noiseSuppression = localStorage.getItem(NS_KEY) !== '0';
 } catch {}
 
-// 灵敏度 → 断句器的门槛：音量要同时高过“最低音量”和“底噪的若干倍”才算在说话
+// 灵敏度 → 断句器的门槛。
+// 按音量判断时：音量要同时高过“最低音量”和“底噪的若干倍”才算在说话。
+// 用 Silero 时：模型给出的“是人声”的概率要过 vadOn，音量也要过一条很低的底线（滤掉远处的电视声）。
 function vadParams() {
   const f = 2 ** ((5 - sensitivity) / 2); // 每降 2 档，门槛翻一倍
-  return { minLevel: 0.01 * f, ratio: Math.min(6, Math.max(1.8, 3 * Math.sqrt(f))) };
+  return {
+    minLevel: 0.01 * f,
+    ratio: Math.min(6, Math.max(1.8, 3 * Math.sqrt(f))),
+    vadOn: Math.min(0.85, Math.max(0.25, 0.5 + (5 - sensitivity) * 0.06)),
+    floor: 0.003 * f,
+  };
+}
+
+// ---------- 人声检测方式（Silero 模型 / 按音量） ----------
+// 跟着这台电脑、这个浏览器走，记在浏览器本地
+
+const VAD_KEY = 'captionduo.vadMode';
+let vadMode = 'silero';
+try { vadMode = localStorage.getItem(VAD_KEY) === 'volume' ? 'volume' : 'silero'; } catch {}
+const useSilero = () => vadMode === 'silero' && vadAvail.ready;
+
+function renderVad() {
+  const opt = $('#vadMode').querySelector('[value=silero]');
+  opt.disabled = !vadAvail.ready;
+  $('#vadMode').value = useSilero() ? 'silero' : 'volume';
+}
+const vadDownNote = () => (vadMode === 'silero' && !vadAvail.ready ? ' ' + t('vadDown', { reason: vadAvail.reason }) : '');
+
+$('#vadMode').onchange = (e) => {
+  vadMode = e.target.value;
+  try { localStorage.setItem(VAD_KEY, vadMode); } catch {}
+  restartIfRunning();
+  renderMode();
+};
+
+// Silero VAD：一个约 2 MB 的人声检测模型，用 onnxruntime-web 在本页面里跑，每 32 毫秒一帧，一帧约 1～2 毫秒。
+// 只在用到时才加载；几路输入共用一个模型，各自保存自己的状态，推理按到达顺序排队。
+const silero = {
+  session: null,
+  v5: true,     // v5/v6 模型的输入是 input + state + sr；v4 是 input + sr + h + c
+  loading: null,
+  queue: Promise.resolve(),
+
+  load() {
+    this.loading ??= (async () => {
+      if (!window.ort) {
+        await new Promise((resolve, reject) => {
+          const el = document.createElement('script');
+          el.src = '/vendor/ort/ort.wasm.min.js';
+          el.onload = resolve;
+          el.onerror = () => reject(new Error('ort.wasm.min.js'));
+          document.head.append(el);
+        });
+      }
+      ort.env.wasm.wasmPaths = '/vendor/ort/';
+      ort.env.wasm.numThreads = 1; // 多线程要跨源隔离，本地页面没有，单线程已经够快
+      ort.env.logLevel = 'error';
+      this.session = await ort.InferenceSession.create('/models/silero_vad.onnx', { executionProviders: ['wasm'] });
+      this.v5 = this.session.inputNames.includes('state');
+    })().catch((e) => {
+      this.loading = null; // 下次开始识别时再试
+      throw e;
+    });
+    return this.loading;
+  },
+};
+
+class VoiceDetector {
+  constructor() {
+    const zeros = (n, dims) => new ort.Tensor('float32', new Float32Array(n), dims);
+    this.sr = new ort.Tensor('int64', BigInt64Array.from([16000n]), []);
+    if (silero.v5) this.state = zeros(256, [2, 1, 128]);
+    else { this.h = zeros(128, [2, 1, 64]); this.c = zeros(128, [2, 1, 64]); }
+    this.context = new Float32Array(64); // v5 要在每帧前面接上上一帧末尾的 64 个采样
+  }
+  // 返回这一帧是人声的概率（0～1）
+  prob(frame) {
+    const job = silero.queue.then(() => this.run(frame));
+    silero.queue = job.catch(() => {});
+    return job;
+  }
+  async run(frame) {
+    const { session } = silero;
+    if (silero.v5) {
+      const x = new Float32Array(64 + frame.length);
+      x.set(this.context);
+      x.set(frame, 64);
+      this.context = x.slice(-64);
+      const r = await session.run({ input: new ort.Tensor('float32', x, [1, x.length]), state: this.state, sr: this.sr });
+      this.state = r.stateN;
+      return r.output.data[0];
+    }
+    const r = await session.run({ input: new ort.Tensor('float32', frame, [1, frame.length]), sr: this.sr, h: this.h, c: this.c });
+    this.h = r.hn;
+    this.c = r.cn;
+    return r.output.data[0];
+  }
 }
 
 function renderSensitivity() {
@@ -1098,10 +1440,11 @@ async function captureDisplayAudio() {
 
 // ---------- 引擎一：自动识别语种（录音 → 断句 → 交给听写模型） ----------
 
-// 断句器：按音量判断有没有人在说话。纯逻辑，不碰浏览器 API。
+// 断句器：判断有没有人在说话，把一句话的音频攒起来。纯逻辑，不碰浏览器 API。
+// feed 时给了 prob（Silero 算出的人声概率）就按模型判断，没给就按音量判断。
 class Segmenter {
-  constructor(sampleRate, { onStart, onEnd, endSilenceMs = 600, maxMs = 12000, minLevel = 0.01, ratio = 3 }) {
-    Object.assign(this, { sampleRate, onStart, onEnd, endSilenceMs, maxMs, minLevel, ratio });
+  constructor(sampleRate, { onStart, onEnd, endSilenceMs = 600, maxMs = 12000, minLevel = 0.01, ratio = 3, vadOn = 0.5, floor = 0.003 }) {
+    Object.assign(this, { sampleRate, onStart, onEnd, endSilenceMs, maxMs, minLevel, ratio, vadOn, floor });
     this.threshold = minLevel; // 当前触发门槛 = max(最低音量, 底噪 × ratio)
     this.noise = 0.003;   // 环境底噪估计，安静时缓慢跟随
     this.level = 0;
@@ -1110,13 +1453,21 @@ class Segmenter {
     this.reset();
   }
   reset() { this.active = false; this.frames = []; this.runMs = 0; this.voicedMs = 0; this.silenceMs = 0; this.totalMs = 0; }
-  feed(frame) {
+  feed(frame, prob) {
     let sum = 0;
     for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
     const rms = (this.level = Math.sqrt(sum / frame.length));
     const ms = (frame.length / this.sampleRate) * 1000;
-    this.threshold = Math.max(this.minLevel, this.noise * this.ratio);
-    const voiced = (this.voiced = rms > this.threshold);
+    let voiced;
+    if (prob === undefined) {
+      this.threshold = Math.max(this.minLevel, this.noise * this.ratio);
+      voiced = rms > this.threshold;
+    } else {
+      // 开口要过 vadOn，说话中掉到 vadOn - 0.15 以下才算停（和 Silero 官方的用法一致，免得句中一顿就断开）
+      this.threshold = this.floor;
+      voiced = rms > this.floor && prob > (this.active ? this.vadOn - 0.15 : this.vadOn);
+    }
+    this.voiced = voiced;
     if (!this.active) {
       this.pre.push(frame);
       if (this.pre.length * ms > 300) this.pre.shift();
@@ -1167,6 +1518,7 @@ function encodeWav(samples, sampleRate) {
 }
 
 function uploadAudio(id, samples, sampleRate, final) {
+  if (status.paused) return Promise.resolve({}); // 暂停中：音频不离开这个页面
   return fetch(`/api/audio?id=${encodeURIComponent(id)}&seq=${++seq}&final=${final ? 1 : 0}`, {
     method: 'POST',
     headers: { 'Content-Type': 'audio/wav' },
@@ -1207,17 +1559,29 @@ const autoEngine = {
     this.streams = cfg.audioSource === 'display' ? [await captureDisplayAudio()] : await captureMics();
     const ctx = (this.ctx = new AudioContext({ sampleRate: 16000 }));
     await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([TAP_WORKLET], { type: 'text/javascript' })));
+    // Silero 只认 16 kHz；加载失败就退回按音量判断，不耽误开始识别
+    let vadNote = '';
+    this.silero = useSilero() && ctx.sampleRate === 16000;
+    if (this.silero) {
+      try {
+        await silero.load();
+      } catch (e) {
+        this.silero = false;
+        vadNote = t('vadLoadFailed', { msg: e.message });
+      }
+    }
     if (!running) return this.stop(); // 启动过程中被停止了
 
     const sid = Date.now().toString(36);
     $('#meters').replaceChildren();
     this.inputs = this.streams.map((stream, k) => this.addInput(stream, `${sid}-${k}`));
     $('#meters').hidden = false;
+    $('#meters').title = this.silero ? t('vadNote').trim() : '';
     if (cfg.audioSource === 'mic') {
       refreshMics(); // 授权后才拿得到设备名
-      setHint('#recHint', '', t('usingMics', { list: this.inputs.map((input) => input.label).join(t('listSep')) }));
-    }
-    setRecState('ok', 'waiting');
+      setHint('#recHint', vadNote ? 'err' : '', t('usingMics', { list: this.inputs.map((input) => input.label).join(t('listSep')) }) + (vadNote ? ' ' + vadNote : ''));
+    } else if (vadNote) setHint('#recHint', 'err', vadNote);
+    this.showState();
   },
 
   addInput(stream, prefix) {
@@ -1256,9 +1620,11 @@ const autoEngine = {
       },
     });
 
-    tap.port.onmessage = (e) => {
+    input.detector = this.silero ? new VoiceDetector() : null;
+    const handle = (frame, prob) => {
+      if (!this.inputs.includes(input)) return; // 已经停止，排队中的帧不再处理
       const seg = input.seg;
-      seg.feed(e.data);
+      seg.feed(frame, prob);
       if (seg.active && seg.voiced) { input.sum += seg.level; input.frames++; }
       bar.style.width = `${Math.min(100, seg.level * 600)}%`;
       bar.classList.toggle('voiced', seg.voiced);
@@ -1271,6 +1637,19 @@ const autoEngine = {
         input.sent++;
         uploadAudio(input.id, seg.snapshot(), ctx.sampleRate, false).finally(() => (input.busy = false));
       }
+    };
+    tap.port.onmessage = (e) => {
+      const frame = e.data;
+      if (!input.detector) return handle(frame);
+      input.detector.prob(frame).then(
+        (p) => handle(frame, p),
+        (err) => {
+          // 模型推理出错：这一路改回按音量判断
+          input.detector = null;
+          setHint('#recHint', 'err', t('vadLoadFailed', { msg: err.message }));
+          handle(frame);
+        },
+      );
     };
     return input;
   },
@@ -1288,7 +1667,8 @@ const autoEngine = {
 
   showState() {
     if (!running) return;
-    if (this.inputs.some((input) => input.seg?.active)) setRecState('live', 'listening');
+    if (status.paused) setRecState('warn', 'pausedRec');
+    else if (this.inputs.some((input) => input.seg?.active)) setRecState('live', 'listening');
     else setRecState('ok', 'waiting');
   },
 
@@ -1340,7 +1720,7 @@ const chromeEngine = {
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
-    rec.onstart = () => { this.startedAt = Date.now(); setRecState('live', 'recognizing'); };
+    rec.onstart = () => { this.startedAt = Date.now(); setRecState(status.paused ? 'warn' : 'live', status.paused ? 'pausedRec' : 'recognizing'); };
     rec.onresult = (e) => this.onResult(e);
     rec.onerror = (e) => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
